@@ -19,7 +19,7 @@ export async function PATCH(
 
     const userId = getUserId(request);
     const db = await getDb();
-    const collection = db.collection<Entry>("entries");
+    const collection = db.collection("entries");
 
     const existing = await collection.findOne({
       _id: new ObjectId(id),
@@ -29,7 +29,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Entry not found" }, { status: 404 });
     }
 
-    const update: Partial<Entry> = {};
+    const update: Record<string, unknown> = {};
     if (name !== undefined) {
       update.name = name.trim();
       update.nameLower = name.trim().toLowerCase();
