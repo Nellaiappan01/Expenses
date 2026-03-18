@@ -9,6 +9,17 @@ type AdminUser = { userId: string; name?: string; username?: string; isAdmin?: b
 
 type UserFeatures = { expenses: boolean; workers: boolean; stock: boolean };
 
+type Entry = {
+  _id: string;
+  type: string;
+  name: string;
+  amount: number;
+  method: string;
+  date: string;
+  note?: string;
+  typeLabel?: string;
+};
+
 export default function AdminPage() {
   const { userId, isAdmin } = useUser();
   const [config, setConfig] = useState<{
@@ -26,6 +37,20 @@ export default function AdminPage() {
   const [resetStatus, setResetStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [deleteUserId, setDeleteUserId] = useState("");
   const [deleteStatus, setDeleteStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [viewUserDashboard, setViewUserDashboard] = useState("");
+  const [dashboardFrom, setDashboardFrom] = useState("");
+  const [dashboardTo, setDashboardTo] = useState("");
+  const [dashboardData, setDashboardData] = useState<{
+    received: number;
+    paid: number;
+    net: number;
+    expense: number;
+    workerPayment: number;
+    rotationCash: number;
+    adjustment: number;
+  } | null>(null);
+  const [dashboardEntries, setDashboardEntries] = useState<Entry[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/config")
@@ -48,6 +73,34 @@ export default function AdminPage() {
       .then((d) => setUserFeatures(d.features ?? { expenses: true, workers: true, stock: false }))
       .catch(() => setUserFeatures({ expenses: true, workers: true, stock: false }));
   }, [selectedUserForFeatures]);
+
+  useEffect(() => {
+    if (!viewUserDashboard.trim()) {
+      setDashboardData(null);
+      setDashboardEntries([]);
+      return;
+    }
+    setDashboardLoading(true);
+    const params = new URLSearchParams();
+    if (dashboardFrom) params.set("from", dashboardFrom);
+    if (dashboardTo) params.set("to", dashboardTo);
+    params.set("limit", "30");
+    Promise.all([
+      apiFetch(`/api/admin/users/${encodeURIComponent(viewUserDashboard)}/dashboard?${params}`),
+      apiFetch(`/api/admin/users/${encodeURIComponent(viewUserDashboard)}/entries?${params}`),
+    ])
+      .then(async ([resDashboard, resEntries]) => {
+        const totals = resDashboard.ok ? await resDashboard.json() : null;
+        const entries = resEntries.ok ? await resEntries.json() : [];
+        setDashboardData(totals);
+        setDashboardEntries(entries);
+      })
+      .catch(() => {
+        setDashboardData(null);
+        setDashboardEntries([]);
+      })
+      .finally(() => setDashboardLoading(false));
+  }, [viewUserDashboard, dashboardFrom, dashboardTo]);
 
   async function handleSave() {
     if (!config) return;
@@ -250,6 +303,109 @@ export default function AdminPage() {
                     >
                       {userFeaturesSaving ? "Saving…" : "Save Features"}
                     </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                View User Dashboard
+              </h2>
+              <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+                View another user&apos;s expenses, totals, and recent entries.
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                    User
+                  </label>
+                  <select
+                    value={viewUserDashboard}
+                    onChange={(e) => setViewUserDashboard(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  >
+                    <option value="">Select user…</option>
+                    {users.map((u) => (
+                      <option key={u.userId} value={u.userId}>
+                        {u.name || u.username || u.userId}
+                        {u.isAdmin ? " (admin)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {viewUserDashboard && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">From</label>
+                        <input
+                          type="date"
+                          value={dashboardFrom}
+                          onChange={(e) => setDashboardFrom(e.target.value)}
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">To</label>
+                        <input
+                          type="date"
+                          value={dashboardTo}
+                          onChange={(e) => setDashboardTo(e.target.value)}
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                        />
+                      </div>
+                    </div>
+                    {dashboardLoading ? (
+                      <div className="flex justify-center py-8">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+                      </div>
+                    ) : dashboardData ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg bg-emerald-50 p-2 dark:bg-emerald-950/30">
+                            <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">Received</p>
+                            <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                              ₹{dashboardData.received.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-red-50 p-2 dark:bg-red-950/30">
+                            <p className="text-[10px] font-medium text-red-700 dark:text-red-400">Paid</p>
+                            <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                              ₹{dashboardData.paid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-zinc-100 p-2 dark:bg-zinc-800">
+                            <p className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400">Net</p>
+                            <p className={`text-sm font-semibold ${dashboardData.net >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                              ₹{dashboardData.net.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Recent entries ({dashboardEntries.length})</p>
+                          <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-zinc-200 bg-zinc-50/50 p-2 dark:border-zinc-700 dark:bg-zinc-800/50">
+                            {dashboardEntries.length === 0 ? (
+                              <p className="py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">No entries</p>
+                            ) : (
+                              dashboardEntries.map((e) => (
+                                <div key={e._id} className="flex justify-between text-xs">
+                                  <span className="truncate text-zinc-700 dark:text-zinc-300">
+                                    {e.date} · {e.name}
+                                    <span className="ml-1 text-zinc-500">
+                                      ({e.type === "expense" ? "Exp" : e.type === "worker_payment" ? "Worker" : e.type === "rotation_cash" ? "Wallet" : "Adj"})
+                                    </span>
+                                  </span>
+                                  <span className={`shrink-0 font-medium ${e.amount >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                    {e.amount >= 0 ? "+" : ""}₹{e.amount.toLocaleString("en-IN")}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
