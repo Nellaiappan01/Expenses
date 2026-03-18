@@ -15,8 +15,11 @@ export default function AddEntryForm({
   const [name, setName] = useState("");
   const [nameOptions, setNameOptions] = useState<string[]>([]);
   const [noteOptions, setNoteOptions] = useState<string[]>([]);
+  const [bankOptions, setBankOptions] = useState<string[]>([]);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("Cash");
+  const [bankName, setBankName] = useState("");
+  const [sender, setSender] = useState("");
   const [date, setDate] = useState(() => {
     const d = new Date();
     return d.toISOString().split("T")[0];
@@ -43,6 +46,7 @@ export default function AddEntryForm({
       }
       setNameOptions(combined.sort((a, b) => a.localeCompare(b)));
       setNoteOptions(defaults.notes ?? []);
+      setBankOptions(defaults.banks ?? []);
     });
   }, [refreshTrigger]);
 
@@ -62,6 +66,8 @@ export default function AddEntryForm({
           method,
           date,
           note: note.trim() || undefined,
+          bankName: bankName.trim() || undefined,
+          sender: sender.trim() || undefined,
         }),
       });
 
@@ -73,6 +79,8 @@ export default function AddEntryForm({
       setName("");
       setAmount("");
       setNote("");
+      setBankName("");
+      setSender("");
       setType("expense");
       setMethod("Cash");
       setDate(new Date().toISOString().split("T")[0]);
@@ -99,19 +107,28 @@ export default function AddEntryForm({
             Type
           </label>
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            {(["income", "expense", "worker_payment", "adjustment"] as const).map(
+            {(["expense", "worker_payment", "adjustment", "rotation_cash"] as const).map(
               (t) => (
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setType(t)}
+                  onClick={() => {
+                    setType(t);
+                    if (t === "rotation_cash") {
+                      if (method === "GPay") setMethod("Cash");
+                    } else {
+                      setBankName("");
+                      setSender("");
+                      if (method === "Bank") setMethod("Cash");
+                    }
+                  }}
                   className={`min-w-0 rounded-xl px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
                     type === t
                       ? "bg-emerald-600 text-white"
                       : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
                   }`}
                 >
-                  {t === "income" ? "Income" : t === "worker_payment" ? "Worker" : t === "adjustment" ? "Adjust" : "Expense"}
+                  {t === "rotation_cash" ? "Wallet" : t === "worker_payment" ? "Worker" : t === "adjustment" ? "Adjust" : "Expense"}
                 </button>
               )
             )}
@@ -152,33 +169,94 @@ export default function AddEntryForm({
 
         <div>
           <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Method
+            {type === "rotation_cash" ? "Received" : "Method"}
           </label>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setMethod("Cash")}
-              className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                method === "Cash"
-                  ? "bg-emerald-600 text-white"
-                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-              }`}
-            >
-              Cash
-            </button>
-            <button
-              type="button"
-              onClick={() => setMethod("GPay")}
-              className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                method === "GPay"
-                  ? "bg-emerald-600 text-white"
-                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-              }`}
-            >
-              GPay
-            </button>
-          </div>
+          {type === "rotation_cash" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setMethod("Cash")}
+                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                  method === "Cash"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+                }`}
+              >
+                Cash
+              </button>
+              <button
+                type="button"
+                onClick={() => setMethod("Bank")}
+                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                  method === "Bank"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+                }`}
+              >
+                Bank
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setMethod("Cash")}
+                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                  method === "Cash"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+                }`}
+              >
+                Cash
+              </button>
+              <button
+                type="button"
+                onClick={() => setMethod("GPay")}
+                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                  method === "GPay"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+                }`}
+              >
+                GPay
+              </button>
+            </div>
+          )}
         </div>
+
+        {type === "rotation_cash" && (
+          <>
+            <div>
+              <input
+                id="sender"
+                type="text"
+                value={sender}
+                onChange={(e) => setSender(e.target.value)}
+                placeholder="Who sent"
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+              />
+            </div>
+            {method === "Bank" && (
+              <div>
+                <select
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+                >
+                  <option value="">Select bank</option>
+                  {bankOptions.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+                {bankOptions.length === 0 && (
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Add banks in Defaults
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        )}
 
         <div>
           <input

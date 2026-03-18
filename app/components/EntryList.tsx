@@ -166,7 +166,7 @@ export default function EntryList({
                             Type
                           </dt>
                           <dd className="text-zinc-900 dark:text-zinc-100">
-                            {entry.type.replace("_", " ")}
+                            {entry.type === "rotation_cash" ? "Wallet" : entry.type.replace("_", " ")}
                           </dd>
                         </div>
                         <div className="flex justify-between">
@@ -177,6 +177,18 @@ export default function EntryList({
                             {new Date(entry.date).toLocaleDateString("en-IN")}
                           </dd>
                         </div>
+                        {entry.bankName && (
+                          <div className="flex justify-between">
+                            <dt className="text-zinc-500 dark:text-zinc-400">Bank</dt>
+                            <dd className="text-zinc-900 dark:text-zinc-100">{entry.bankName}</dd>
+                          </div>
+                        )}
+                        {entry.sender && (
+                          <div className="flex justify-between">
+                            <dt className="text-zinc-500 dark:text-zinc-400">From</dt>
+                            <dd className="text-zinc-900 dark:text-zinc-100">{entry.sender}</dd>
+                          </div>
+                        )}
                         {entry.note && (
                           <div>
                             <dt className="text-zinc-500 dark:text-zinc-400">

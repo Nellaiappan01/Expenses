@@ -7,17 +7,20 @@ import { apiFetch } from "@/lib/api";
 export default function DefaultsPage() {
   const [names, setNames] = useState<string[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
+  const [banks, setBanks] = useState<string[]>([]);
   const [newName, setNewName] = useState("");
   const [newNote, setNewNote] = useState("");
+  const [newBank, setNewBank] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/defaults")
-      .then((r) => r.ok ? r.json() : { names: [], notes: [] })
+    apiFetch("/api/defaults")
+      .then((r) => r.ok ? r.json() : { names: [], notes: [], banks: [] })
       .then((d) => {
         setNames(d.names ?? []);
         setNotes(d.notes ?? []);
+        setBanks(d.banks ?? []);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -29,7 +32,7 @@ export default function DefaultsPage() {
       const res = await apiFetch("/api/defaults", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names, notes }),
+        body: JSON.stringify({ names, notes, banks }),
       });
       if (res.ok) {
         // Saved
@@ -63,6 +66,18 @@ export default function DefaultsPage() {
 
   function removeNote(i: number) {
     setNotes(notes.filter((_, j) => j !== i));
+  }
+
+  function addBank() {
+    const v = newBank.trim();
+    if (v && !banks.includes(v)) {
+      setBanks([...banks, v]);
+      setNewBank("");
+    }
+  }
+
+  function removeBank(i: number) {
+    setBanks(banks.filter((_, j) => j !== i));
   }
 
   if (loading) {
@@ -174,6 +189,52 @@ export default function DefaultsPage() {
                   <button
                     type="button"
                     onClick={() => removeNote(i)}
+                    className="text-zinc-400 hover:text-red-500"
+                    aria-label="Remove"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              Banks
+            </h2>
+            <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+              Used when selecting &quot;Received Bank&quot; in Wallet entries.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newBank}
+                onChange={(e) => setNewBank(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addBank())}
+                placeholder="Add bank"
+                className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+              />
+              <button
+                type="button"
+                onClick={addBank}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                Add
+              </button>
+            </div>
+            <ul className="mt-3 space-y-1">
+              {banks.map((b, i) => (
+                <li
+                  key={`${b}-${i}`}
+                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800"
+                >
+                  <span className="text-sm text-zinc-900 dark:text-zinc-100">{b}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeBank(i)}
                     className="text-zinc-400 hover:text-red-500"
                     aria-label="Remove"
                   >

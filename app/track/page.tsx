@@ -209,6 +209,7 @@ export default function TrackPage() {
                 <option value="">All</option>
                 <option value="Cash">Cash</option>
                 <option value="GPay">GPay</option>
+                <option value="Bank">Bank</option>
               </select>
             </div>
           </div>
@@ -222,7 +223,7 @@ export default function TrackPage() {
               className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
             >
               <option value="">All</option>
-              <option value="income">Income</option>
+              <option value="rotation_cash">Wallet</option>
               <option value="expense">Expense</option>
               <option value="worker_payment">Worker Payment</option>
               <option value="adjustment">Adjustment</option>
@@ -296,7 +297,7 @@ export default function TrackPage() {
                         </p>
                         <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                           {formatDate(entry.date)} · {entry.method} ·{" "}
-                          {entry.type.replace("_", " ")}
+                          {entry.type === "rotation_cash" ? "Wallet" : entry.type.replace("_", " ")}
                         </p>
                       </div>
                       <div className="ml-3 flex shrink-0 items-center gap-2">
@@ -334,7 +335,7 @@ export default function TrackPage() {
                               Type
                             </dt>
                             <dd className="text-zinc-900 dark:text-zinc-100">
-                              {entry.type.replace("_", " ")}
+                              {entry.type === "rotation_cash" ? "Wallet" : entry.type.replace("_", " ")}
                             </dd>
                           </div>
                           <div className="flex justify-between">
@@ -353,6 +354,18 @@ export default function TrackPage() {
                               {entry.method}
                             </dd>
                           </div>
+                          {entry.bankName && (
+                            <div className="flex justify-between">
+                              <dt className="text-zinc-500 dark:text-zinc-400">Bank</dt>
+                              <dd className="text-zinc-900 dark:text-zinc-100">{entry.bankName}</dd>
+                            </div>
+                          )}
+                          {entry.sender && (
+                            <div className="flex justify-between">
+                              <dt className="text-zinc-500 dark:text-zinc-400">From</dt>
+                              <dd className="text-zinc-900 dark:text-zinc-100">{entry.sender}</dd>
+                            </div>
+                          )}
                           {entry.note && (
                             <div>
                               <dt className="text-zinc-500 dark:text-zinc-400">

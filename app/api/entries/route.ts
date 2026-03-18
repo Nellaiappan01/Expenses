@@ -6,7 +6,7 @@ import type { Entry, EntryInput } from "@/lib/types";
 export async function POST(request: NextRequest) {
   try {
     const body: EntryInput = await request.json();
-    const { name, amount, method, date, note, type = "expense" } = body;
+    const { name, amount, method, date, note, bankName, sender, type = "expense" } = body;
 
     if (!name || amount === undefined || amount === null) {
       return NextResponse.json(
@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
       method: method || "Cash",
       date: date || new Date().toISOString().split("T")[0],
       note: note?.trim() || undefined,
+      bankName: bankName?.trim() || undefined,
+      sender: sender?.trim() || undefined,
       businessId: userId,
       createdAt: new Date(),
     };

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 
 interface Summary {
-  income: number;
+  rotationCash: number;
   expense: number;
   workerPayment: number;
   adjustment: number;
@@ -24,11 +24,11 @@ function SummaryCard({
 }: {
   label: string;
   value: number;
-  variant?: "income" | "expense" | "payment" | "adjustment" | "net" | "default";
+  variant?: "rotation" | "expense" | "payment" | "adjustment" | "net" | "default";
   className?: string;
 }) {
   const colors =
-    variant === "income"
+    variant === "rotation"
       ? "text-emerald-600 dark:text-emerald-400"
       : variant === "expense"
         ? "text-red-600 dark:text-red-400"
@@ -59,23 +59,28 @@ export default function DashboardSummary({
 }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   const fetchSummary = useCallback(async () => {
     try {
-      const res = await apiFetch("/api/dashboard/summary");
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const res = await apiFetch(`/api/dashboard/summary?${params}`);
       if (res.ok) {
         const data = await res.json();
         setSummary(data);
       } else {
-        setSummary({ income: 0, expense: 0, workerPayment: 0, adjustment: 0, net: 0 });
+        setSummary({ rotationCash: 0, expense: 0, workerPayment: 0, adjustment: 0, net: 0 });
       }
     } catch (err) {
       console.error("Failed to fetch summary:", err);
-      setSummary({ income: 0, expense: 0, workerPayment: 0, adjustment: 0, net: 0 });
+      setSummary({ rotationCash: 0, expense: 0, workerPayment: 0, adjustment: 0, net: 0 });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [from, to]);
 
   useEffect(() => {
     setLoading(true);
@@ -96,7 +101,7 @@ export default function DashboardSummary({
   }
 
   const data = summary ?? {
-    income: 0,
+    rotationCash: 0,
     expense: 0,
     workerPayment: 0,
     adjustment: 0,
@@ -104,12 +109,32 @@ export default function DashboardSummary({
   };
 
   return (
-    <div className="grid grid-cols-2 gap-2">
-      <SummaryCard label="Income" value={data.income} variant="income" />
-      <SummaryCard label="Expense" value={data.expense} variant="expense" />
-      <SummaryCard label="Workers" value={data.workerPayment} variant="payment" />
-      <SummaryCard label="Adjust" value={data.adjustment} variant="adjustment" />
-      <SummaryCard label="Net" value={data.net} variant="net" className="col-span-2" />
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">From</label>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="w-full rounded-lg border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+          />
+        </div>
+        <div>
+          <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">To</label>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="w-full rounded-lg border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <SummaryCard label="Received" value={data.rotationCash} variant="rotation" />
+        <SummaryCard label="Expenses" value={data.expense + data.workerPayment} variant="expense" />
+        <SummaryCard label="Net" value={data.net} variant="net" className="col-span-2" />
+      </div>
     </div>
   );
 }

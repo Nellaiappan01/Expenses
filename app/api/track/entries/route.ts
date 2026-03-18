@@ -27,8 +27,8 @@ export async function GET(request: NextRequest) {
       if (to) (match.date as Record<string, string>).$lte = to;
     }
     if (name) match.nameLower = name.toLowerCase();
-    if (method && (method === "Cash" || method === "GPay")) match.method = method;
-    if (type && ["income", "expense", "worker_payment", "adjustment"].includes(type)) match.type = type;
+    if (method && ["Cash", "GPay", "Bank"].includes(method)) match.method = method;
+    if (type && ["rotation_cash", "expense", "worker_payment", "adjustment"].includes(type)) match.type = type;
     if (search) {
       const searchLower = search.toLowerCase();
       match.$or = [

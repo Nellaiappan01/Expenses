@@ -6,6 +6,7 @@ export interface DefaultsDoc {
   businessId: string;
   names: string[];
   notes: string[];
+  banks: string[];
 }
 
 export async function GET(request: NextRequest) {
@@ -19,10 +20,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       names: doc?.names ?? [],
       notes: doc?.notes ?? [],
+      banks: doc?.banks ?? [],
     });
   } catch (error) {
     console.error("Error fetching defaults:", error);
-    return NextResponse.json({ names: [], notes: [] });
+    return NextResponse.json({ names: [], notes: [], banks: [] });
   }
 }
 
@@ -30,7 +32,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { names, notes } = body;
+    const { names, notes, banks } = body;
 
     const userId = getUserId(request);
     const db = await getDb();
@@ -41,6 +43,7 @@ export async function POST(request: NextRequest) {
           businessId: userId,
           names: Array.isArray(names) ? names : [],
           notes: Array.isArray(notes) ? notes : [],
+          banks: Array.isArray(banks) ? banks : [],
         },
       },
       { upsert: true }

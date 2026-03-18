@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       .toArray();
 
     const totals = {
-      income: 0,
+      rotationCash: 0,
       expense: 0,
       workerPayment: 0,
       adjustment: 0,
@@ -37,21 +37,21 @@ export async function GET(request: NextRequest) {
     };
 
     for (const row of result) {
-      if (row._id === "income") totals.income = row.total;
+      if (row._id === "rotation_cash") totals.rotationCash = row.total;
       else if (row._id === "expense") totals.expense = row.total;
       else if (row._id === "worker_payment") totals.workerPayment = row.total;
       else if (row._id === "adjustment") totals.adjustment = row.total;
     }
 
-    totals.received = totals.income;
+    totals.received = totals.rotationCash;
     totals.paid = totals.expense + totals.workerPayment;
-    totals.net = totals.income + totals.expense + totals.workerPayment + totals.adjustment;
+    totals.net = totals.rotationCash + totals.expense + totals.workerPayment + totals.adjustment;
 
     return NextResponse.json(totals);
   } catch (error) {
     console.error("Error fetching totals:", error);
     return NextResponse.json({
-      income: 0,
+      rotationCash: 0,
       expense: 0,
       workerPayment: 0,
       adjustment: 0,
