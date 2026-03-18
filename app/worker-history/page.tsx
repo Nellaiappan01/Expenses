@@ -2,8 +2,11 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { useConfig } from "../context/ConfigContext";
 import type { Entry } from "@/lib/types";
+import EditEntrySheet, { EditIcon, TrashIcon } from "../components/EditEntrySheet";
 
 interface NameWithTotal {
   name: string;
@@ -27,17 +30,32 @@ function formatAmount(amount: number) {
   return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 }
 
+type FilterType = "expense" | "worker_payment" | "adjustment" | "all";
+
 export default function WorkerHistoryPage() {
+  const router = useRouter();
+  const { config } = useConfig() ?? {};
   const [names, setNames] = useState<NameWithTotal[]>([]);
+
+  useEffect(() => {
+    if (config && !config.features?.workers) {
+      router.replace("/");
+    }
+  }, [config, router]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loadingNames, setLoadingNames] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [selectedNameLower, setSelectedNameLower] = useState<string | null>(null);
   const [selectedDisplayName, setSelectedDisplayName] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterType>("all");
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+  const [bankOptions, setBankOptions] = useState<string[]>([]);
 
   const fetchNames = useCallback(async () => {
     try {
-      const res = await apiFetch("/api/worker-history/names");
+      const params = new URLSearchParams();
+      if (filter !== "all") params.set("type", filter);
+      const res = await apiFetch(`/api/worker-history/names?${params}`);
       if (res.ok) {
         const data = await res.json();
         setNames(data);
@@ -47,14 +65,14 @@ export default function WorkerHistoryPage() {
     } finally {
       setLoadingNames(false);
     }
-  }, []);
+  }, [filter]);
 
   const fetchEntries = useCallback(async (nameLower: string) => {
     setLoadingEntries(true);
     try {
-      const res = await apiFetch(
-        `/api/worker-history/entries?nameLower=${encodeURIComponent(nameLower)}`
-      );
+      const params = new URLSearchParams({ nameLower });
+      if (filter !== "all") params.set("type", filter);
+      const res = await apiFetch(`/api/worker-history/entries?${params}`);
       if (res.ok) {
         const data = await res.json();
         setEntries(data);
@@ -64,11 +82,24 @@ export default function WorkerHistoryPage() {
     } finally {
       setLoadingEntries(false);
     }
+  }, [filter]);
+
+  useEffect(() => {
+    apiFetch("/api/defaults")
+      .then((r) => (r.ok ? r.json() : { banks: [] }))
+      .then((d) => setBankOptions(d.banks ?? []));
   }, []);
 
   useEffect(() => {
+    setLoadingNames(true);
     fetchNames();
   }, [fetchNames]);
+
+  useEffect(() => {
+    if (selectedNameLower) {
+      fetchEntries(selectedNameLower);
+    }
+  }, [filter, selectedNameLower, fetchEntries]);
 
   useEffect(() => {
     if (names.length === 0) return;
@@ -117,6 +148,20 @@ export default function WorkerHistoryPage() {
     setSelectedNameLower(null);
     setSelectedDisplayName(null);
     setEntries([]);
+  }
+
+  async function handleDelete(entry: Entry, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Delete this entry?")) return;
+    try {
+      const res = await apiFetch(`/api/entries/${entry._id}`, { method: "DELETE" });
+      if (res.ok && selectedNameLower) {
+        setEntries((prev) => prev.filter((e) => e._id !== entry._id));
+        fetchNames();
+      }
+    } catch (err) {
+      console.error("Failed to delete:", err);
+    }
   }
 
   const totalForSelected = selectedNameLower
@@ -180,6 +225,23 @@ export default function WorkerHistoryPage() {
           </div>
         </header>
 
+        <div className="mb-4 flex gap-2">
+          {(["all", "expense", "worker_payment", "adjustment"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
+                filter === f
+                  ? "bg-emerald-600 text-white"
+                  : "bg-white text-zinc-600 hover:bg-zinc-100 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              }`}
+            >
+              {f === "all" ? "All" : f === "expense" ? "Expenses" : f === "worker_payment" ? "Workers" : "Adj"}
+            </button>
+          ))}
+        </div>
+
         {selectedNameLower ? (
           <div className="space-y-6">
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -214,9 +276,9 @@ export default function WorkerHistoryPage() {
                   {entries.map((entry) => (
                     <div
                       key={entry._id}
-                      className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+                      className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
                     >
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                           {formatDate(entry.date)}
                         </p>
@@ -233,6 +295,27 @@ export default function WorkerHistoryPage() {
                       >
                         {formatAmount(entry.amount)}
                       </p>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingEntry(entry);
+                          }}
+                          className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                          aria-label="Edit"
+                        >
+                          <EditIcon />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDelete(entry, e)}
+                          className="rounded-lg p-2 text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                          aria-label="Delete"
+                        >
+                          <TrashIcon />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -300,6 +383,19 @@ export default function WorkerHistoryPage() {
               </div>
             )}
           </div>
+        )}
+
+        {editingEntry && (
+          <EditEntrySheet
+            entry={editingEntry}
+            bankOptions={bankOptions}
+            onClose={() => setEditingEntry(null)}
+            onSuccess={() => {
+              if (selectedNameLower) fetchEntries(selectedNameLower);
+              fetchNames();
+              setEditingEntry(null);
+            }}
+          />
         )}
       </div>
     </div>

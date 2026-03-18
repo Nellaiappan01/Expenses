@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
+import { getUserId } from "@/lib/user";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const userId = await getUserId(request);
+    if (userId === "default") {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
     const db = await getDb();
     const users = await db
       .collection("users")
@@ -20,10 +25,20 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { userId, name } = body;
+    const userId = await getUserId(request);
+    if (userId === "default") {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const db = await getDb();
+    const user = await db.collection("users").findOne({ userId });
+    if (!user?.isAdmin) {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    }
 
-    const id = (userId || name || "").trim().toLowerCase().replace(/\s+/g, "_");
+    const body = await request.json();
+    const { userId: targetId, name } = body;
+
+    const id = (targetId || name || "").trim().toLowerCase().replace(/\s+/g, "_");
     if (!id) {
       return NextResponse.json(
         { error: "User ID or name is required" },
@@ -31,7 +46,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const db = await getDb();
     await db.collection("users").updateOne(
       { userId: id },
       { $set: { userId: id, name: (name || id).trim(), updatedAt: new Date() } },

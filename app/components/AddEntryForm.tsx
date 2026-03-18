@@ -2,7 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
+import { useConfig } from "@/app/context/ConfigContext";
 import type { EntryType, PaymentMethod } from "@/lib/types";
+
+const TYPE_FEATURES: Record<string, "expenses" | "workers"> = {
+  expense: "expenses",
+  worker_payment: "workers",
+};
 
 export default function AddEntryForm({
   onSuccess,
@@ -11,7 +17,19 @@ export default function AddEntryForm({
   onSuccess?: () => void;
   refreshTrigger?: number;
 }) {
-  const [type, setType] = useState<EntryType>("expense");
+  const { config } = useConfig() ?? {};
+  const features = config?.features ?? { expenses: true, workers: true, stock: false };
+  const visibleTypes = (["expense", "worker_payment", "adjustment", "rotation_cash"] as const).filter(
+    (t) => !TYPE_FEATURES[t] || features[TYPE_FEATURES[t]]
+  );
+  const defaultType = visibleTypes[0] ?? "expense";
+  const [type, setType] = useState<EntryType>(defaultType);
+
+  useEffect(() => {
+    if (visibleTypes.length > 0 && !visibleTypes.includes(type)) {
+      setType(visibleTypes[0]);
+    }
+  }, [features.expenses, features.workers, type]);
   const [name, setName] = useState("");
   const [nameOptions, setNameOptions] = useState<string[]>([]);
   const [noteOptions, setNoteOptions] = useState<string[]>([]);
@@ -99,8 +117,7 @@ export default function AddEntryForm({
     >
       <div className="space-y-4">
         <div className="grid w-full grid-cols-4 gap-1.5">
-          {(["expense", "worker_payment", "adjustment", "rotation_cash"] as const).map(
-              (t) => (
+          {visibleTypes.map((t) => (
                 <button
                   key={t}
                   type="button"

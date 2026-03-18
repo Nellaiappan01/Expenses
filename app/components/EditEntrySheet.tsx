@@ -58,19 +58,20 @@ export default function EditEntrySheet({
     setError("");
     setSaving(true);
     try {
+      const payload = {
+        type,
+        name: type === "rotation_cash" ? (sender.trim() || "Wallet") : type === "adjustment" ? (note.trim() || "Adjustment") : name.trim(),
+        amount: Number(amount),
+        method,
+        date,
+        note: note.trim(),
+        bankName: bankName.trim() || null,
+        sender: sender.trim() || null,
+      };
       const res = await apiFetch(`/api/entries/${entry._id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type,
-          name: type === "rotation_cash" ? (sender.trim() || "Wallet") : type === "adjustment" ? (note.trim() || "Adjustment") : name.trim(),
-          amount: Number(amount),
-          method,
-          date,
-          note: note.trim() || undefined,
-          bankName: bankName.trim() || undefined,
-          sender: sender.trim() || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json();

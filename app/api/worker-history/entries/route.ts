@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const nameLower = searchParams.get("nameLower");
+    const type = searchParams.get("type");
 
     if (!nameLower || !nameLower.trim()) {
       return NextResponse.json(
@@ -15,14 +16,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const userId = getUserId(request);
+    const userId = await getUserId(request);
     const db = await getDb();
+
+    const match: Record<string, unknown> = {
+      businessId: userId,
+      nameLower: nameLower.trim().toLowerCase(),
+    };
+    if (type && ["expense", "worker_payment", "adjustment"].includes(type)) {
+      match.type = type;
+    }
+
     const entries = await db
       .collection<Entry>("entries")
-      .find({
-        businessId: userId,
-        nameLower: nameLower.trim().toLowerCase(),
-      })
+      .find(match)
       .sort({ date: -1, createdAt: -1 })
       .toArray();
 

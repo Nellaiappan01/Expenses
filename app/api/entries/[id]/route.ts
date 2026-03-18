@@ -17,7 +17,7 @@ export async function PATCH(
     const body: Partial<EntryInput> = await request.json();
     const { name, amount, method, date, note, bankName, sender, type } = body;
 
-    const userId = getUserId(request);
+    const userId = await getUserId(request);
     const db = await getDb();
     const collection = db.collection("entries");
 
@@ -29,22 +29,47 @@ export async function PATCH(
       return NextResponse.json({ error: "Entry not found" }, { status: 404 });
     }
 
-    const update: Record<string, unknown> = {};
+    const setUpdate: Record<string, unknown> = {};
+    const unsetUpdate: Record<string, string> = {};
     if (name !== undefined) {
-      update.name = name.trim();
-      update.nameLower = name.trim().toLowerCase();
+      setUpdate.name = name.trim();
+      setUpdate.nameLower = name.trim().toLowerCase();
     }
-    if (amount !== undefined) update.amount = Number(amount);
-    if (method !== undefined) update.method = method;
-    if (date !== undefined) update.date = date;
-    if (note !== undefined) update.note = note?.trim() || undefined;
-    if (bankName !== undefined) update.bankName = bankName?.trim() || undefined;
-    if (sender !== undefined) update.sender = sender?.trim() || undefined;
-    if (type !== undefined) update.type = type;
+    if (amount !== undefined) setUpdate.amount = Number(amount);
+    if (method !== undefined) setUpdate.method = method;
+    if (date !== undefined) setUpdate.date = date;
+    if (note !== undefined) {
+      const v = note?.trim();
+      if (v) setUpdate.note = v;
+      else unsetUpdate.note = "";
+    }
+    if (bankName !== undefined) {
+      const v = bankName?.trim();
+      if (v) setUpdate.bankName = v;
+      else unsetUpdate.bankName = "";
+    }
+    if (sender !== undefined) {
+      const v = sender?.trim();
+      if (v) setUpdate.sender = v;
+      else unsetUpdate.sender = "";
+    }
+    if (type !== undefined) setUpdate.type = type;
+
+    const updateOp: Record<string, unknown> = {};
+    if (Object.keys(setUpdate).length) updateOp.$set = setUpdate;
+    if (Object.keys(unsetUpdate).length) updateOp.$unset = unsetUpdate;
+
+    if (Object.keys(updateOp).length === 0) {
+      return NextResponse.json({
+        ...existing,
+        _id: existing._id?.toString(),
+        createdAt: existing.createdAt?.toISOString?.(),
+      });
+    }
 
     const result = await collection.findOneAndUpdate(
       { _id: new ObjectId(id), businessId: userId },
-      { $set: update },
+      updateOp,
       { returnDocument: "after" }
     );
 
@@ -76,7 +101,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Invalid entry ID" }, { status: 400 });
     }
 
-    const userId = getUserId(request);
+    const userId = await getUserId(request);
     const db = await getDb();
     const result = await db.collection("entries").deleteOne({
       _id: new ObjectId(id),

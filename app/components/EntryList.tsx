@@ -29,9 +29,13 @@ function formatAmount(amount: number) {
 export default function EntryList({
   refreshTrigger = 0,
   limit,
+  todayOnly = false,
+  onRefresh,
 }: {
   refreshTrigger?: number;
   limit?: number;
+  todayOnly?: boolean;
+  onRefresh?: () => void;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,9 +46,18 @@ export default function EntryList({
 
   const fetchEntries = useCallback(async () => {
     try {
-      const url = limit
-        ? `/api/track/entries?page=1&limit=${limit}`
-        : "/api/entries";
+      let url: string;
+      if (limit) {
+        const params = new URLSearchParams({ page: "1", limit: String(limit) });
+        if (todayOnly) {
+          const today = new Date().toISOString().split("T")[0];
+          params.set("from", today);
+          params.set("to", today);
+        }
+        url = `/api/track/entries?${params}`;
+      } else {
+        url = "/api/entries";
+      }
       const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -57,7 +70,7 @@ export default function EntryList({
     } finally {
       setLoading(false);
     }
-  }, [limit]);
+  }, [limit, todayOnly]);
 
   useEffect(() => {
     apiFetch("/api/defaults")
@@ -107,20 +120,28 @@ export default function EntryList({
   if (entries.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/50 py-12 text-center text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-400">
-        <p className="text-sm">No entries yet.</p>
-        <p className="mt-1 text-xs">Add your first entry above.</p>
+        <p className="text-sm">{todayOnly ? "No entries for today." : "No entries yet."}</p>
+        <p className="mt-1 text-xs">{todayOnly ? "Add an entry above or view all in Track." : "Add your first entry above."}</p>
+        {todayOnly && (
+          <Link
+            href="/track"
+            className="mt-3 inline-block text-sm font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
+          >
+            View all entries →
+          </Link>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {hasMore && (
+      {(hasMore || todayOnly) && (
         <Link
           href="/track"
           className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white py-2.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
         >
-          Track All
+          {todayOnly ? "View all entries" : "Track All"}
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
@@ -263,6 +284,7 @@ export default function EntryList({
           onSuccess={() => {
             fetchEntries();
             setEditingEntry(null);
+            onRefresh?.();
           }}
         />
       )}

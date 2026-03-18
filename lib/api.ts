@@ -5,8 +5,16 @@ export function getApiHeaders(): Record<string, string> {
   try {
     const stored = localStorage.getItem(USER_KEY);
     if (!stored) return { "X-User-Id": "default" };
-    const { userId } = JSON.parse(stored);
-    return { "X-User-Id": userId || "default" };
+    const data = JSON.parse(stored);
+    const headers: Record<string, string> = {};
+    if (data.token) {
+      headers["Authorization"] = `Bearer ${data.token}`;
+    } else if (data.userId) {
+      headers["X-User-Id"] = data.userId;
+    } else {
+      headers["X-User-Id"] = "default";
+    }
+    return headers;
   } catch {
     return { "X-User-Id": "default" };
   }

@@ -11,7 +11,7 @@ export interface DefaultsDoc {
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = getUserId(request);
+    const userId = await getUserId(request);
     const db = await getDb();
     const doc = await db.collection<DefaultsDoc>("defaults").findOne({
       businessId: userId,
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { names, notes, banks } = body;
 
-    const userId = getUserId(request);
+    const userId = await getUserId(request);
     const db = await getDb();
     await db.collection("defaults").updateOne(
       { businessId: userId },

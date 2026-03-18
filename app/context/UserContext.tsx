@@ -14,7 +14,8 @@ const USER_KEY = "ledger_user_id";
 type UserContextType = {
   userId: string | null;
   userName: string | null;
-  setUser: (userId: string, userName: string) => void;
+  isAdmin: boolean;
+  setUser: (data: { token?: string; userId: string; userName: string; isAdmin?: boolean }) => void;
   clearUser: () => void;
   fetchHeaders: () => Record<string, string>;
 };
@@ -24,15 +25,17 @@ const UserContext = createContext<UserContextType | null>(null);
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(USER_KEY);
     if (stored) {
       try {
-        const { userId: id, userName: name } = JSON.parse(stored);
-        setUserId(id);
-        setUserName(name || id);
+        const data = JSON.parse(stored);
+        setUserId(data.userId);
+        setUserName(data.userName || data.userId);
+        setIsAdmin(!!data.isAdmin);
       } catch {
         localStorage.removeItem(USER_KEY);
       }
@@ -40,15 +43,25 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  const setUser = useCallback((id: string, name: string) => {
-    setUserId(id);
-    setUserName(name || id);
-    localStorage.setItem(USER_KEY, JSON.stringify({ userId: id, userName: name || id }));
+  const setUser = useCallback((data: { token?: string; userId: string; userName: string; isAdmin?: boolean }) => {
+    setUserId(data.userId);
+    setUserName(data.userName || data.userId);
+    setIsAdmin(!!data.isAdmin);
+    localStorage.setItem(
+      USER_KEY,
+      JSON.stringify({
+        token: data.token,
+        userId: data.userId,
+        userName: data.userName || data.userId,
+        isAdmin: !!data.isAdmin,
+      })
+    );
   }, []);
 
   const clearUser = useCallback(() => {
     setUserId(null);
     setUserName(null);
+    setIsAdmin(false);
     localStorage.removeItem(USER_KEY);
   }, []);
 
@@ -56,8 +69,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(USER_KEY);
     if (stored) {
       try {
-        const { userId: id } = JSON.parse(stored);
-        return id ? { "X-User-Id": id } : { "X-User-Id": "default" };
+        const data = JSON.parse(stored);
+        if (data.token) return { Authorization: `Bearer ${data.token}` };
+        if (data.userId) return { "X-User-Id": data.userId };
       } catch {}
     }
     return { "X-User-Id": "default" };
@@ -66,6 +80,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const value: UserContextType = {
     userId,
     userName,
+    isAdmin,
     setUser,
     clearUser,
     fetchHeaders,

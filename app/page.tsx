@@ -21,7 +21,12 @@ export default function Home() {
             <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
               Entries
             </h2>
-            <EntryList refreshTrigger={refreshTrigger} limit={10} />
+            <EntryList
+            refreshTrigger={refreshTrigger}
+            limit={10}
+            todayOnly
+            onRefresh={() => setRefreshTrigger((n) => n + 1)}
+          />
           </section>
         </div>
       </div>

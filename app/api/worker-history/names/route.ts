@@ -9,14 +9,25 @@ export interface NameWithTotal {
   count: number;
 }
 
+const ENTRY_TYPES = ["expense", "worker_payment", "adjustment"] as const;
+
 export async function GET(request: NextRequest) {
   try {
-    const userId = getUserId(request);
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get("type");
+
+    const userId = await getUserId(request);
     const db = await getDb();
+
+    const match: Record<string, unknown> = { businessId: userId };
+    if (type && ENTRY_TYPES.includes(type as (typeof ENTRY_TYPES)[number])) {
+      match.type = type;
+    }
+
     const result = await db
       .collection("entries")
       .aggregate<NameWithTotal>([
-        { $match: { businessId: userId } },
+        { $match: match },
         {
           $group: {
             _id: "$nameLower",

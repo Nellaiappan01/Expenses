@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useConfig } from "@/app/context/ConfigContext";
 
 const mainNavItems = [
   { href: "/", label: "Home", icon: HomeIcon },
   { href: "/totals", label: "Totals", icon: TotalsIcon },
   { href: "/track", label: "Track", icon: TrackIcon },
+  { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
   { href: "/report", label: "Report", icon: ReportIcon },
 ];
 
@@ -42,18 +44,33 @@ function TrackIcon({ active }: { active: boolean }) {
   );
 }
 
+function StockIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+    </svg>
+  );
+}
+
 export default function Navbar() {
   const pathname = usePathname();
+  const { config } = useConfig() ?? {};
 
   if (pathname === "/select-user") return null;
 
   const isActive = (href: string) =>
     pathname === href || (href !== "/" && pathname.startsWith(href));
 
+  const navItems = mainNavItems.filter((item) => {
+    if (!("feature" in item)) return true;
+    const f = item.feature as keyof NonNullable<typeof config>["features"];
+    return !!config?.features?.[f];
+  });
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 pb-[env(safe-area-inset-bottom)]">
       <div className="mx-auto flex max-w-md">
-        {mainNavItems.map(({ href, label, icon: Icon }) => {
+        {navItems.map(({ href, label, icon: Icon }) => {
           const active = isActive(href);
           return (
             <Link

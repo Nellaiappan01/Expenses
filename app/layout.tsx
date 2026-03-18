@@ -6,6 +6,7 @@ import MainWithPadding from "./components/MainWithPadding";
 import Navbar from "./components/Navbar";
 import PwaProvider from "./components/PwaProvider";
 import RequireUser from "./components/RequireUser";
+import { ConfigProvider } from "./context/ConfigContext";
 import { UserProvider } from "./context/UserContext";
 
 const geistSans = Geist({
@@ -54,6 +55,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased pb-20`}
       >
         <UserProvider>
+          <ConfigProvider>
           <RequireUser>
             <PwaProvider>
               <AppHeader />
@@ -61,6 +63,7 @@ export default function RootLayout({
               <Navbar />
             </PwaProvider>
           </RequireUser>
+          </ConfigProvider>
         </UserProvider>
       </body>
     </html>
