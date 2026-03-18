@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { useConfig } from "../context/ConfigContext";
 import type { Entry } from "@/lib/types";
 
 interface NameWithTotal {
@@ -26,6 +28,8 @@ function formatAmount(amount: number) {
 }
 
 export default function TrackPage() {
+  const router = useRouter();
+  const { config } = useConfig() ?? {};
   const [entries, setEntries] = useState<Entry[]>([]);
   const [names, setNames] = useState<NameWithTotal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +90,14 @@ export default function TrackPage() {
   );
 
   useEffect(() => {
+    const features = config?.features ?? { expenses: false, workers: false, stock: false };
+    const hasLedger = features.expenses || features.workers;
+    if (config && !hasLedger) {
+      router.replace(features.stock ? "/stock" : "/");
+    }
+  }, [config, router]);
+
+  useEffect(() => {
     fetchNames();
   }, [fetchNames]);
 
@@ -105,6 +117,9 @@ export default function TrackPage() {
   function nextPage() {
     if (hasMore) fetchEntries(page + 1);
   }
+
+  const features = config?.features ?? { expenses: false, workers: false, stock: false };
+  if (config && !features.expenses && !features.workers) return null;
 
   return (
     <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">

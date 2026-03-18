@@ -5,11 +5,11 @@ import { usePathname } from "next/navigation";
 import { useConfig } from "@/app/context/ConfigContext";
 
 const mainNavItems = [
-  { href: "/", label: "Home", icon: HomeIcon },
-  { href: "/totals", label: "Totals", icon: TotalsIcon },
-  { href: "/track", label: "Track", icon: TrackIcon },
+  { href: "/", label: "Home", icon: HomeIcon, ledger: true },
+  { href: "/totals", label: "Totals", icon: TotalsIcon, ledger: true },
+  { href: "/track", label: "Track", icon: TrackIcon, ledger: true },
   { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
-  { href: "/report", label: "Report", icon: ReportIcon },
+  { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
 ];
 
 function HomeIcon({ active }: { active: boolean }) {
@@ -61,10 +61,16 @@ export default function Navbar() {
   const isActive = (href: string) =>
     pathname === href || (href !== "/" && pathname.startsWith(href));
 
+  const features = config?.features ?? { expenses: false, workers: false, stock: false };
+  const hasLedger = features.expenses || features.workers;
+
   const navItems = mainNavItems.filter((item) => {
-    if (!("feature" in item)) return true;
-    const f = item.feature as keyof NonNullable<typeof config>["features"];
-    return !!config?.features?.[f];
+    if ("ledger" in item && item.ledger) return hasLedger;
+    if ("feature" in item) {
+      const f = item.feature as keyof NonNullable<typeof config>["features"];
+      return !!features[f];
+    }
+    return true;
   });
 
   return (

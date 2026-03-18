@@ -8,10 +8,10 @@ import { useUser } from "../context/UserContext";
 import { apiFetch } from "@/lib/api";
 
 const baseNavItems = [
-  { href: "/report", label: "Report", icon: ReportIcon },
+  { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
   { href: "/worker-history", label: "Worker details", icon: WorkerDetailsIcon, feature: "workers" as const },
   { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
-  { href: "/defaults", label: "Defaults", icon: SettingsIcon },
+  { href: "/defaults", label: "Defaults", icon: SettingsIcon, ledger: true },
 ];
 const adminNavItem = { href: "/admin", label: "Admin", icon: SettingsIcon };
 
@@ -145,9 +145,14 @@ export default function AppHeader() {
               <div className="space-y-1">
                 {(isAdmin ? [...baseNavItems, adminNavItem] : baseNavItems)
                   .filter((item) => {
-                    if (!("feature" in item)) return true;
-                    const f = item.feature as keyof NonNullable<typeof config>["features"];
-                    return !!config?.features?.[f];
+                    const features = config?.features ?? { expenses: false, workers: false, stock: false };
+                    const hasLedger = features.expenses || features.workers;
+                    if ("ledger" in item && item.ledger) return hasLedger;
+                    if ("feature" in item) {
+                      const f = item.feature as keyof NonNullable<typeof config>["features"];
+                      return !!features[f];
+                    }
+                    return true;
                   })
                   .map(({ href, label, icon: Icon }) => {
                   const active = isActive(href);

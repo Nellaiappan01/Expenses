@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { useConfig } from "../context/ConfigContext";
 
 function formatAmount(amount: number) {
   const sign = amount >= 0 ? "" : "-";
@@ -10,6 +12,8 @@ function formatAmount(amount: number) {
 }
 
 export default function TotalsPage() {
+  const router = useRouter();
+  const { config } = useConfig() ?? {};
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [totals, setTotals] = useState({
@@ -42,8 +46,19 @@ export default function TotalsPage() {
   }, [from, to]);
 
   useEffect(() => {
+    const features = config?.features ?? { expenses: false, workers: false, stock: false };
+    const hasLedger = features.expenses || features.workers;
+    if (config && !hasLedger) {
+      router.replace(features.stock ? "/stock" : "/");
+    }
+  }, [config, router]);
+
+  useEffect(() => {
     fetchTotals();
   }, [fetchTotals]);
+
+  const features = config?.features ?? { expenses: false, workers: false, stock: false };
+  if (config && !features.expenses && !features.workers) return null;
 
   return (
     <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">

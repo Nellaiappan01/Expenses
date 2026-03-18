@@ -1,12 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AddEntryForm from "./components/AddEntryForm";
 import EntryList from "./components/EntryList";
 import NetAmountCard from "./components/NetAmountCard";
+import { useConfig } from "./context/ConfigContext";
 
 export default function Home() {
+  const router = useRouter();
+  const { config } = useConfig() ?? {};
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  useEffect(() => {
+    const features = config?.features ?? { expenses: false, workers: false, stock: false };
+    const hasLedger = features.expenses || features.workers;
+    if (config && !hasLedger && features.stock) {
+      router.replace("/stock");
+    }
+  }, [config, router]);
+
+  const features = config?.features ?? { expenses: false, workers: false, stock: false };
+  const hasLedger = features.expenses || features.workers;
+  if (config && !hasLedger) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">

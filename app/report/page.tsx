@@ -1,13 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { useConfig } from "../context/ConfigContext";
 
 export default function ReportPage() {
+  const router = useRouter();
+  const { config } = useConfig() ?? {};
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const features = config?.features ?? { expenses: false, workers: false, stock: false };
+    const hasLedger = features.expenses || features.workers;
+    if (config && !hasLedger) {
+      router.replace(features.stock ? "/stock" : "/");
+    }
+  }, [config, router]);
+
+  const features = config?.features ?? { expenses: false, workers: false, stock: false };
+  if (config && !features.expenses && !features.workers) return null;
 
   async function downloadCSV() {
     setLoading(true);
