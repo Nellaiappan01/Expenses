@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "/",
     name: "Cash Flow Ledger",
     short_name: "Ledger",
     description: "Track expenses and payments",

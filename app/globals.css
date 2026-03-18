@@ -21,6 +21,37 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+/* Bottom sheet - smooth open */
+@keyframes sheet-slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.nav-sheet {
+  animation: sheet-slide-up 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Backdrop fade */
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.nav-sheet-backdrop {
+  animation: backdrop-fade-in 0.2s ease-out;
 }
 
 body {

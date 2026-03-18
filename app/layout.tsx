@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import AppHeader from "./components/AppHeader";
+import MainWithPadding from "./components/MainWithPadding";
 import Navbar from "./components/Navbar";
+import PwaProvider from "./components/PwaProvider";
 import RequireUser from "./components/RequireUser";
 import { UserProvider } from "./context/UserContext";
 
@@ -43,12 +46,15 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased pb-16`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased pb-20`}
       >
         <UserProvider>
           <RequireUser>
-            {children}
-            <Navbar />
+            <PwaProvider>
+              <AppHeader />
+              <MainWithPadding>{children}</MainWithPadding>
+              <Navbar />
+            </PwaProvider>
           </RequireUser>
         </UserProvider>
       </body>
