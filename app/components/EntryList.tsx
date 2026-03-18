@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import type { Entry } from "@/lib/types";
+import EditEntrySheet, { EditIcon, TrashIcon } from "./EditEntrySheet";
 
 function formatDate(isoDate: string) {
   const d = new Date(isoDate);
@@ -36,6 +37,8 @@ export default function EntryList({
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [hasMoreFromApi, setHasMoreFromApi] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+  const [bankOptions, setBankOptions] = useState<string[]>([]);
 
   const fetchEntries = useCallback(async () => {
     try {
@@ -57,10 +60,30 @@ export default function EntryList({
   }, [limit]);
 
   useEffect(() => {
+    apiFetch("/api/defaults")
+      .then((r) => (r.ok ? r.json() : { banks: [] }))
+      .then((d) => setBankOptions(d.banks ?? []));
+  }, []);
+
+  useEffect(() => {
     fetchEntries();
   }, [fetchEntries, refreshTrigger]);
 
   const hasMore = limit ? hasMoreFromApi : false;
+
+  async function handleDelete(entry: Entry, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Delete this entry?")) return;
+    try {
+      const res = await apiFetch(`/api/entries/${entry._id}`, { method: "DELETE" });
+      if (res.ok) {
+        setEntries((prev) => prev.filter((e) => e._id !== entry._id));
+        setExpandedId(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete:", err);
+    }
+  }
 
   const grouped = entries.reduce<Record<string, Entry[]>>((acc, entry) => {
     const key = entry.date;
@@ -160,6 +183,29 @@ export default function EntryList({
                   </button>
                   {isExpanded && (
                     <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+                      <div className="mb-3 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingEntry(entry);
+                          }}
+                          className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                          aria-label="Edit"
+                        >
+                          <EditIcon />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDelete(entry, e)}
+                          className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                          aria-label="Delete"
+                        >
+                          <TrashIcon />
+                          Delete
+                        </button>
+                      </div>
                       <dl className="space-y-1 text-sm">
                         <div className="flex justify-between">
                           <dt className="text-zinc-500 dark:text-zinc-400">
@@ -208,6 +254,18 @@ export default function EntryList({
           </div>
         </section>
       ))}
+
+      {editingEntry && (
+        <EditEntrySheet
+          entry={editingEntry}
+          bankOptions={bankOptions}
+          onClose={() => setEditingEntry(null)}
+          onSuccess={() => {
+            fetchEntries();
+            setEditingEntry(null);
+          }}
+        />
+      )}
     </div>
   );
 }

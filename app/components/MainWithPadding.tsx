@@ -8,7 +8,7 @@ export default function MainWithPadding({ children }: { children: React.ReactNod
 
   return (
     <main
-      className={hasHeader ? "pt-[calc(3.5rem+env(safe-area-inset-top))]" : ""}
+      className={hasHeader ? "pt-[calc(4rem+env(safe-area-inset-top))]" : ""}
     >
       {children}
     </main>

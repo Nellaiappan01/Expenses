@@ -61,7 +61,7 @@ export default function AddEntryForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type,
-          name: name.trim(),
+          name: type === "rotation_cash" ? (sender.trim() || "Wallet") : type === "adjustment" ? (note.trim() || "Adjustment") : name.trim(),
           amount: Number(amount),
           method,
           date,
@@ -97,17 +97,9 @@ export default function AddEntryForm({
       onSubmit={handleSubmit}
       className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-5"
     >
-      <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-        Add Entry
-      </h2>
-
       <div className="space-y-4">
-        <div>
-          <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Type
-          </label>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            {(["expense", "worker_payment", "adjustment", "rotation_cash"] as const).map(
+        <div className="grid w-full grid-cols-4 gap-1.5">
+          {(["expense", "worker_payment", "adjustment", "rotation_cash"] as const).map(
               (t) => (
                 <button
                   key={t}
@@ -122,7 +114,7 @@ export default function AddEntryForm({
                       if (method === "Bank") setMethod("Cash");
                     }
                   }}
-                  className={`min-w-0 rounded-xl px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
+                  className={`min-w-0 rounded-xl px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:py-3 sm:text-sm ${
                     type === t
                       ? "bg-emerald-600 text-white"
                       : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
@@ -132,27 +124,63 @@ export default function AddEntryForm({
                 </button>
               )
             )}
-          </div>
         </div>
 
-        <div>
-          <input
-            id="name"
-            type="text"
-            list="name-list"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name (select or type new)"
-            required
-            autoComplete="off"
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-          />
-          <datalist id="name-list">
-            {nameOptions.map((opt) => (
-              <option key={opt} value={opt} />
-            ))}
-          </datalist>
-        </div>
+        {type === "expense" && (
+          <div>
+            <input
+              id="name"
+              type="text"
+              list="name-list"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Name (select or type new)"
+              required
+              autoComplete="off"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+            />
+            <datalist id="name-list">
+              {nameOptions.map((opt) => (
+                <option key={opt} value={opt} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {type === "worker_payment" && (
+          <div>
+            <input
+              id="name"
+              type="text"
+              list="name-list"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Worker name (select or type)"
+              required
+              autoComplete="off"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+            />
+            <datalist id="name-list">
+              {nameOptions.map((opt) => (
+                <option key={opt} value={opt} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {type === "rotation_cash" && (
+          <div>
+            <input
+              id="sender"
+              type="text"
+              value={sender}
+              onChange={(e) => setSender(e.target.value)}
+              placeholder="Who sent"
+              required
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+            />
+          </div>
+        )}
 
         <div>
           <input
@@ -161,12 +189,13 @@ export default function AddEntryForm({
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value.replace(/[^0-9.-]/g, ""))}
-            placeholder="Amount"
+            placeholder={type === "adjustment" ? "Amount (+ to add, - to subtract)" : "Amount"}
             required
             className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 [font-size:16px]"
           />
         </div>
 
+        {type !== "adjustment" && (
         <div>
           <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
             {type === "rotation_cash" ? "Received" : "Method"}
@@ -223,20 +252,17 @@ export default function AddEntryForm({
             </div>
           )}
         </div>
+        )}
 
-        {type === "rotation_cash" && (
-          <>
-            <div>
-              <input
-                id="sender"
-                type="text"
-                value={sender}
-                onChange={(e) => setSender(e.target.value)}
-                placeholder="Who sent"
-                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-              />
-            </div>
-            {method === "Bank" && (
+        {type === "adjustment" && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+              Balance correction. Use + amount to add, - amount to subtract.
+            </p>
+          </div>
+        )}
+
+        {type === "rotation_cash" && method === "Bank" && (
               <div>
                 <select
                   value={bankName}
@@ -254,8 +280,6 @@ export default function AddEntryForm({
                   </p>
                 )}
               </div>
-            )}
-          </>
         )}
 
         <div>
@@ -265,7 +289,8 @@ export default function AddEntryForm({
             list="note-list"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Note"
+            placeholder={type === "adjustment" ? "Reason for adjustment (required)" : "Note"}
+            required={type === "adjustment"}
             className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
           <datalist id="note-list">

@@ -21,6 +21,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cash Flow Ledger",
   description: "Track expenses and payments",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/icon-192.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -42,9 +49,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link rel="apple-touch-icon" href="/icon.svg" />
-      </head>
+      <head />
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased pb-20`}
       >

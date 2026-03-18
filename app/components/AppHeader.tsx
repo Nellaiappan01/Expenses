@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUser } from "../context/UserContext";
 
 const menuNavItems = [
   { href: "/report", label: "Report", icon: ReportIcon },
@@ -46,6 +47,7 @@ function HamburgerIcon() {
 export default function AppHeader() {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { userName } = useUser();
 
   if (pathname === "/select-user") return null;
 
@@ -54,21 +56,28 @@ export default function AppHeader() {
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-end gap-2 border-b border-zinc-200/80 bg-white/95 px-4 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-900/95 pt-[env(safe-area-inset-top)]">
-        <Link
-          href="/select-user"
-          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-        >
-          Switch User
-        </Link>
-        <button
-          type="button"
-          onClick={() => setMenuOpen(true)}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          aria-label="More menu"
-        >
-          <HamburgerIcon />
-        </button>
+      <header className="fixed top-0 left-0 right-0 z-40 flex min-h-16 items-center justify-between gap-2 border-b border-zinc-200/80 bg-white/95 px-4 py-2 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-900/95 pt-[env(safe-area-inset-top)]">
+        <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
+          <h1 className="truncate text-base font-semibold leading-tight text-zinc-900 dark:text-zinc-100">
+            Cash Flow Ledger
+          </h1>
+          <Link
+            href="/select-user"
+            className="truncate text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          >
+            {userName || "Switch User"}
+          </Link>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            aria-label="More menu"
+          >
+            <HamburgerIcon />
+          </button>
+        </div>
       </header>
 
       {menuOpen && (

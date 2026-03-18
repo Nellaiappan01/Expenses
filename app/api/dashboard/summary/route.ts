@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       else if (row._id === "worker_payment") summary.workerPayment = row.total;
       else if (row._id === "adjustment") summary.adjustment = row.total;
     }
-    summary.net = summary.rotationCash + summary.expense + summary.workerPayment + summary.adjustment;
+    summary.net = summary.rotationCash - summary.expense - summary.workerPayment + summary.adjustment;
 
     return NextResponse.json(summary);
   } catch (error) {

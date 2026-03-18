@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     totals.received = totals.rotationCash;
     totals.paid = totals.expense + totals.workerPayment;
-    totals.net = totals.rotationCash + totals.expense + totals.workerPayment + totals.adjustment;
+    totals.net = totals.received - totals.paid + totals.adjustment;
 
     return NextResponse.json(totals);
   } catch (error) {
