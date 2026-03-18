@@ -81,6 +81,7 @@ export default function StockPage() {
   const [editCount, setEditCount] = useState("");
   const [editValue, setEditValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchItems = useCallback(async () => {
     const res = await apiFetch("/api/stock");
@@ -252,7 +253,44 @@ export default function StockPage() {
     }
   }
 
-  const totalValue = items.reduce((s, i) => s + i.count * i.valuePerUnit, 0);
+  function filterAndSortItems(list: StockItem[], query: string): StockItem[] {
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+    return list
+      .map((item) => {
+        const name = normalize(item.name);
+        const nameLower = item.name.toLowerCase();
+        let score = 0;
+
+        if (name === q) score = 100;
+        else if (name.startsWith(q) || nameLower.startsWith(q)) score = 80;
+        else if (name.includes(q) || nameLower.includes(q)) score = 60;
+        else if (tokens.every((t) => name.includes(t) || nameLower.includes(t))) {
+          const matchedTokens = tokens.filter((t) => name.includes(t) || nameLower.includes(t)).length;
+          score = 40 + matchedTokens * 5;
+        } else {
+          const partialMatch = tokens.some((t) => name.includes(t) || nameLower.includes(t));
+          if (partialMatch) score = 20;
+          else return null;
+        }
+        return { item, score };
+      })
+      .filter((x): x is { item: StockItem; score: number } => x !== null)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.item);
+  }
+
+  const filteredItems = filterAndSortItems(items, searchQuery);
+  const displayItems = [...filteredItems].sort((a, b) => {
+    if (a.count === 0 && b.count !== 0) return 1;
+    if (a.count !== 0 && b.count === 0) return -1;
+    return a.name.localeCompare(b.name);
+  });
+  const totalValue = filteredItems.reduce((s, i) => s + i.count * i.valuePerUnit, 0);
   const updatingItem = items.find((i) => i._id === updatingId);
 
   if (loading) {
@@ -271,35 +309,35 @@ export default function StockPage() {
             Stock Check
           </h1>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleDownload("full")}
+                  disabled={downloading}
+                  title="Full report (Summary + History)"
+                  className="flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                >
+                  <DownloadIcon />
+                  <span className="hidden sm:inline">{downloading ? "…" : "Full"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownload("history")}
+                  disabled={downloading}
+                  className="flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                  title="Check History only"
+                >
+                  <DownloadIcon />
+                  <span className="hidden sm:inline">{downloading ? "…" : "History"}</span>
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={() => handleDownload("full")}
-                disabled={downloading}
-                title="Full report (Summary + History)"
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                onClick={() => setAddOpen(!addOpen)}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
               >
-                <DownloadIcon />
-                <span className="hidden sm:inline">{downloading ? "…" : "Full"}</span>
+                {addOpen ? "Cancel" : "+ Add"}
               </button>
-              <button
-                type="button"
-                onClick={() => handleDownload("history")}
-                disabled={downloading}
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                title="Check History only"
-              >
-                <DownloadIcon />
-                <span className="hidden sm:inline">{downloading ? "…" : "History"}</span>
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setAddOpen(!addOpen)}
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
-            >
-              {addOpen ? "Cancel" : "+ Add"}
-          </button>
           </div>
         </div>
 
@@ -360,9 +398,46 @@ export default function StockPage() {
           </div>
         ) : (
           <>
+            <div className="mb-4">
+              <div className="relative">
+                <svg
+                  className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by name (e.g. 7.00 R16, Vihan Lug, 7.50)"
+                  className="w-full rounded-xl border border-zinc-200 bg-white py-3 pl-10 pr-4 text-sm text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+                    aria-label="Clear search"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {searchQuery && (
+                <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  {filteredItems.length} of {items.length} items
+                </p>
+              )}
+            </div>
+
             <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                Total Value
+                Total Value{searchQuery ? " (filtered)" : ""}
               </p>
               <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
                 ₹{totalValue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
@@ -370,23 +445,41 @@ export default function StockPage() {
             </div>
 
             <div className="space-y-2">
-              {items.map((item) => (
+              {filteredItems.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50/50 py-8 text-center dark:border-zinc-700 dark:bg-zinc-900/50">
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                    No items match &quot;{searchQuery}&quot;
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="mt-2 text-sm font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
+                  >
+                    Clear search
+                  </button>
+                </div>
+              ) : (
+              displayItems.map((item) => (
                 <div
                   key={item._id}
-                  className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+                  className={`overflow-hidden rounded-xl border bg-white dark:bg-zinc-900 ${
+                    item.count === 0
+                      ? "border-red-300 dark:border-red-800"
+                      : "border-zinc-200 dark:border-zinc-800"
+                  }`}
                 >
                   <div className="flex items-center gap-3 px-4 py-3">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-zinc-900 dark:text-zinc-100">
+                      <p className={`truncate font-medium ${item.count === 0 ? "text-red-700 dark:text-red-400" : "text-zinc-900 dark:text-zinc-100"}`}>
                         {item.name}
                       </p>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      <p className={`text-xs ${item.count === 0 ? "text-red-600 dark:text-red-500" : "text-zinc-500 dark:text-zinc-400"}`}>
                         {item.count} × ₹{item.valuePerUnit.toLocaleString("en-IN")} = ₹
                         {(item.count * item.valuePerUnit).toLocaleString("en-IN")}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+                      <span className={`text-lg font-semibold tabular-nums ${item.count === 0 ? "text-red-600 dark:text-red-400" : "text-zinc-900 dark:text-zinc-100"}`}>
                         {item.count}
                       </span>
                       <button
@@ -473,7 +566,7 @@ export default function StockPage() {
                     </div>
                   )}
                 </div>
-              ))}
+              )              ))}
             </div>
           </>
         )}

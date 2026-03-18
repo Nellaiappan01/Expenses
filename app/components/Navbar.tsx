@@ -9,6 +9,7 @@ const mainNavItems = [
   { href: "/totals", label: "Totals", icon: TotalsIcon, ledger: true },
   { href: "/track", label: "Track", icon: TrackIcon, ledger: true },
   { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
+  { href: "/stock/dashboard", label: "Dashboard", icon: DashboardIcon, feature: "stock" as const },
   { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
 ];
 
@@ -52,14 +53,26 @@ function StockIcon({ active }: { active: boolean }) {
   );
 }
 
+function DashboardIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  );
+}
+
 export default function Navbar() {
   const pathname = usePathname();
   const { config } = useConfig() ?? {};
 
   if (pathname === "/select-user") return null;
 
-  const isActive = (href: string) =>
-    pathname === href || (href !== "/" && pathname.startsWith(href));
+  const isActive = (href: string) => {
+    if (pathname === href) return true;
+    if (href === "/stock") return pathname === "/stock" || pathname === "/stock/";
+    if (href !== "/") return pathname.startsWith(href);
+    return false;
+  };
 
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   const hasLedger = features.expenses || features.workers;
