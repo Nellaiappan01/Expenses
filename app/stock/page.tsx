@@ -199,7 +199,7 @@ export default function StockPage() {
             : i
         )
       );
-      setNewCount(String(data.newCount));
+      closeUpdate();
     }
   }
 
