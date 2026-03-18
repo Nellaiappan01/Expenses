@@ -4,7 +4,9 @@ import { getUserId } from "@/lib/user";
 
 export interface DefaultsDoc {
   businessId: string;
-  names: string[];
+  names?: string[];
+  expenseNames?: string[];
+  workerNames?: string[];
   notes: string[];
   banks: string[];
 }
@@ -17,22 +19,23 @@ export async function GET(request: NextRequest) {
       businessId: userId,
     });
 
+    const legacyNames = doc?.names ?? [];
     return NextResponse.json({
-      names: doc?.names ?? [],
+      expenseNames: doc?.expenseNames ?? legacyNames,
+      workerNames: doc?.workerNames ?? [],
       notes: doc?.notes ?? [],
       banks: doc?.banks ?? [],
     });
   } catch (error) {
     console.error("Error fetching defaults:", error);
-    return NextResponse.json({ names: [], notes: [], banks: [] });
+    return NextResponse.json({ expenseNames: [], workerNames: [], notes: [], banks: [] });
   }
 }
-
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { names, notes, banks } = body;
+    const { expenseNames, workerNames, notes, banks } = body;
 
     const userId = await getUserId(request);
     const db = await getDb();
@@ -41,7 +44,8 @@ export async function POST(request: NextRequest) {
       {
         $set: {
           businessId: userId,
-          names: Array.isArray(names) ? names : [],
+          expenseNames: Array.isArray(expenseNames) ? expenseNames : [],
+          workerNames: Array.isArray(workerNames) ? workerNames : [],
           notes: Array.isArray(notes) ? notes : [],
           banks: Array.isArray(banks) ? banks : [],
         },

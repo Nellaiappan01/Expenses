@@ -5,10 +5,12 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 
 export default function DefaultsPage() {
-  const [names, setNames] = useState<string[]>([]);
+  const [expenseNames, setExpenseNames] = useState<string[]>([]);
+  const [workerNames, setWorkerNames] = useState<string[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
   const [banks, setBanks] = useState<string[]>([]);
-  const [newName, setNewName] = useState("");
+  const [newExpenseName, setNewExpenseName] = useState("");
+  const [newWorkerName, setNewWorkerName] = useState("");
   const [newNote, setNewNote] = useState("");
   const [newBank, setNewBank] = useState("");
   const [loading, setLoading] = useState(true);
@@ -16,9 +18,10 @@ export default function DefaultsPage() {
 
   useEffect(() => {
     apiFetch("/api/defaults")
-      .then((r) => r.ok ? r.json() : { names: [], notes: [], banks: [] })
+      .then((r) => r.ok ? r.json() : { expenseNames: [], workerNames: [], notes: [], banks: [] })
       .then((d) => {
-        setNames(d.names ?? []);
+        setExpenseNames(d.expenseNames ?? []);
+        setWorkerNames(d.workerNames ?? []);
         setNotes(d.notes ?? []);
         setBanks(d.banks ?? []);
       })
@@ -32,7 +35,7 @@ export default function DefaultsPage() {
       const res = await apiFetch("/api/defaults", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names, notes, banks }),
+        body: JSON.stringify({ expenseNames, workerNames, notes, banks }),
       });
       if (res.ok) {
         // Saved
@@ -44,16 +47,28 @@ export default function DefaultsPage() {
     }
   }
 
-  function addName() {
-    const v = newName.trim();
-    if (v && !names.includes(v)) {
-      setNames([...names, v]);
-      setNewName("");
+  function addExpenseName() {
+    const v = newExpenseName.trim();
+    if (v && !expenseNames.includes(v)) {
+      setExpenseNames([...expenseNames, v]);
+      setNewExpenseName("");
     }
   }
 
-  function removeName(i: number) {
-    setNames(names.filter((_, j) => j !== i));
+  function removeExpenseName(i: number) {
+    setExpenseNames(expenseNames.filter((_, j) => j !== i));
+  }
+
+  function addWorkerName() {
+    const v = newWorkerName.trim();
+    if (v && !workerNames.includes(v)) {
+      setWorkerNames([...workerNames, v]);
+      setNewWorkerName("");
+    }
+  }
+
+  function removeWorkerName(i: number) {
+    setWorkerNames(workerNames.filter((_, j) => j !== i));
   }
 
   function addNote() {
@@ -114,30 +129,30 @@ export default function DefaultsPage() {
         <div className="space-y-6">
           <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Default Names
+              Expense Names
             </h2>
             <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
-              Shown in Add Entry dropdown. Manual names are not added here.
+              For expense entries (groceries, bills, etc.). Shown in Add Entry dropdown.
             </p>
             <div className="flex gap-2">
               <input
                 type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addName())}
-                placeholder="Add name"
+                value={newExpenseName}
+                onChange={(e) => setNewExpenseName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addExpenseName())}
+                placeholder="Add expense name"
                 className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
               />
               <button
                 type="button"
-                onClick={addName}
+                onClick={addExpenseName}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
               >
                 Add
               </button>
             </div>
             <ul className="mt-3 space-y-1">
-              {names.map((n, i) => (
+              {expenseNames.map((n, i) => (
                 <li
                   key={`${n}-${i}`}
                   className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800"
@@ -145,7 +160,53 @@ export default function DefaultsPage() {
                   <span className="text-sm text-zinc-900 dark:text-zinc-100">{n}</span>
                   <button
                     type="button"
-                    onClick={() => removeName(i)}
+                    onClick={() => removeExpenseName(i)}
+                    className="text-zinc-400 hover:text-red-500"
+                    aria-label="Remove"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              Worker Names
+            </h2>
+            <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+              For worker payment entries. Shown in Add Entry dropdown. Workers from entries are also shown.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newWorkerName}
+                onChange={(e) => setNewWorkerName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addWorkerName())}
+                placeholder="Add worker name"
+                className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+              />
+              <button
+                type="button"
+                onClick={addWorkerName}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                Add
+              </button>
+            </div>
+            <ul className="mt-3 space-y-1">
+              {workerNames.map((n, i) => (
+                <li
+                  key={`${n}-${i}`}
+                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800"
+                >
+                  <span className="text-sm text-zinc-900 dark:text-zinc-100">{n}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeWorkerName(i)}
                     className="text-zinc-400 hover:text-red-500"
                     aria-label="Remove"
                   >

@@ -31,9 +31,11 @@ export default function AddEntryForm({
     }
   }, [features.expenses, features.workers, type]);
   const [name, setName] = useState("");
-  const [nameOptions, setNameOptions] = useState<string[]>([]);
+  const [expenseNameOptions, setExpenseNameOptions] = useState<string[]>([]);
+  const [workerNameOptions, setWorkerNameOptions] = useState<string[]>([]);
   const [noteOptions, setNoteOptions] = useState<string[]>([]);
   const [bankOptions, setBankOptions] = useState<string[]>([]);
+  const nameOptions = type === "expense" ? expenseNameOptions : type === "worker_payment" ? workerNameOptions : [];
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("Cash");
   const [bankName, setBankName] = useState("");
@@ -48,21 +50,23 @@ export default function AddEntryForm({
 
   useEffect(() => {
     Promise.all([
-      apiFetch("/api/defaults").then((r) => (r.ok ? r.json() : { names: [] })),
+      apiFetch("/api/defaults").then((r) => (r.ok ? r.json() : { expenseNames: [], workerNames: [] })),
       apiFetch("/api/worker-history/names").then((r) => (r.ok ? r.json() : [])),
     ]).then(([defaults, namesFromEntries]) => {
-      const fromDefaults = defaults.names ?? [];
-      const fromEntries = (namesFromEntries ?? []).map((n: { name: string }) => n.name);
+      const expenseNames = ((defaults.expenseNames ?? []) as string[]).map((n) => String(n).trim()).filter(Boolean);
+      const workerFromDefaults = (defaults.workerNames ?? []).map((n: string) => String(n).trim()).filter(Boolean);
+      const workerFromEntries = (namesFromEntries ?? []).map((n: { name: string }) => n.name);
       const seen = new Set<string>();
-      const combined: string[] = [];
-      for (const n of [...fromDefaults, ...fromEntries]) {
+      const workerCombined: string[] = [];
+      for (const n of [...workerFromDefaults, ...workerFromEntries]) {
         const key = String(n).trim().toLowerCase();
         if (key && !seen.has(key)) {
           seen.add(key);
-          combined.push(String(n).trim());
+          workerCombined.push(String(n).trim());
         }
       }
-      setNameOptions(combined.sort((a, b) => a.localeCompare(b)));
+      setExpenseNameOptions([...new Set(expenseNames)].sort((a, b) => a.localeCompare(b)) as string[]);
+      setWorkerNameOptions(workerCombined.sort((a, b) => a.localeCompare(b)));
       setNoteOptions(defaults.notes ?? []);
       setBankOptions(defaults.banks ?? []);
     });
