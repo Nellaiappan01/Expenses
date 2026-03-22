@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       rows.push(`Generated,${new Date().toISOString().split("T")[0]}`);
       rows.push("");
       rows.push(
-        ["Stock Name", "Check Date", "Previous Count", "New Count", "Difference"].join(",")
+        ["Stock Name", "Check Date", "Last check Date", "Current Stock", "Difference"].join(",")
       );
       for (const h of history) {
         const item = itemMap.get(h.stockId);
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
           [
             escapeCsv(name),
             escapeCsv(date),
-            h.previousCount,
+            escapeCsv(date),
             h.newCount,
             h.difference >= 0 ? `+${h.difference}` : h.difference,
           ].join(",")
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
 
       rows.push("Check History");
       rows.push(
-        ["Stock Name", "Check Date", "Previous Count", "New Count", "Difference"].join(",")
+        ["Stock Name", "Check Date", "Last check Date", "Current Stock", "Difference"].join(",")
       );
       for (const h of history) {
         const item = itemMap.get(h.stockId);
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
           [
             escapeCsv(name),
             escapeCsv(date),
-            h.previousCount,
+            escapeCsv(date),
             h.newCount,
             h.difference >= 0 ? `+${h.difference}` : h.difference,
           ].join(",")

@@ -81,6 +81,7 @@ export default function StockPage() {
   const [editCount, setEditCount] = useState("");
   const [editValue, setEditValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [checkSaving, setCheckSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchItems = useCallback(async () => {
@@ -174,7 +175,9 @@ export default function StockPage() {
   }
 
   async function handleCheck() {
-    if (!updatingId || newCount === "") return;
+    if (!updatingId || newCount === "" || checkSaving) return;
+    setCheckSaving(true);
+    try {
     const res = await apiFetch(`/api/stock/${updatingId}/check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -200,6 +203,9 @@ export default function StockPage() {
         )
       );
       closeUpdate();
+    }
+    } finally {
+      setCheckSaving(false);
     }
   }
 
@@ -290,6 +296,7 @@ export default function StockPage() {
     if (a.count !== 0 && b.count === 0) return -1;
     return a.name.localeCompare(b.name);
   });
+  const totalCount = filteredItems.reduce((s, i) => s + i.count, 0);
   const totalValue = filteredItems.reduce((s, i) => s + i.count * i.valuePerUnit, 0);
   const updatingItem = items.find((i) => i._id === updatingId);
 
@@ -435,13 +442,23 @@ export default function StockPage() {
               )}
             </div>
 
-            <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                Total Value{searchQuery ? " (filtered)" : ""}
-              </p>
-              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
-                ₹{totalValue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-              </p>
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  Total Count{searchQuery ? " (filtered)" : ""}
+                </p>
+                <p className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
+                  {totalCount.toLocaleString("en-IN")}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  Total Value{searchQuery ? " (filtered)" : ""}
+                </p>
+                <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                  ₹{totalValue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </p>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -765,10 +782,17 @@ export default function StockPage() {
                   <button
                     type="button"
                     onClick={handleCheck}
-                    disabled={newCount === ""}
-                    className="w-full rounded-xl bg-emerald-600 py-3 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                    disabled={newCount === "" || checkSaving}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
-                    Save Check
+                    {checkSaving ? (
+                      <>
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        Saving…
+                      </>
+                    ) : (
+                      "Save Check"
+                    )}
                   </button>
                 </div>
               </div>

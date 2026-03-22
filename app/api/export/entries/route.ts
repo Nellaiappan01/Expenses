@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const from = searchParams.get("from");
     const to = searchParams.get("to");
+    const search = searchParams.get("search")?.trim();
     const format = searchParams.get("format") || "csv";
 
     const userId = await getUserId(request);
@@ -18,6 +19,13 @@ export async function GET(request: NextRequest) {
       match.date = {};
       if (from) (match.date as Record<string, string>).$gte = from;
       if (to) (match.date as Record<string, string>).$lte = to;
+    }
+    if (search) {
+      const searchLower = search.toLowerCase();
+      match.$or = [
+        { nameLower: { $regex: searchLower, $options: "i" } },
+        { note: { $regex: search, $options: "i" } },
+      ];
     }
 
     const entries = await db

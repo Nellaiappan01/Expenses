@@ -7,14 +7,29 @@ import { useConfig } from "../context/ConfigContext";
 import { useUser } from "../context/UserContext";
 import { apiFetch } from "@/lib/api";
 
+function getTodayHref() {
+  const today = new Date().toISOString().split("T")[0];
+  return `/track?from=${today}&to=${today}`;
+}
+
 const baseNavItems = [
-  { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
+  { href: "/track", label: "Today's entries", icon: TodayIcon, ledger: true, dynamicHref: getTodayHref },
+  { href: "/report", label: "Report", icon: ReportIcon, anyFeature: true },
   { href: "/worker-history", label: "Worker details", icon: WorkerDetailsIcon, feature: "workers" as const },
   { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
+  { href: "/stock/out", label: "Stock Out", icon: StockOutIcon, feature: "stock" as const },
   { href: "/stock/dashboard", label: "Dashboard", icon: DashboardIcon, feature: "stock" as const },
   { href: "/defaults", label: "Defaults", icon: SettingsIcon, ledger: true },
 ];
 const adminNavItem = { href: "/admin", label: "Admin", icon: SettingsIcon };
+
+function TodayIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
 
 function ReportIcon() {
   return (
@@ -36,6 +51,14 @@ function StockIcon() {
   return (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+    </svg>
+  );
+}
+
+function StockOutIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4m0 0l4-4m-4 4l4 4" />
     </svg>
   );
 }
@@ -156,6 +179,8 @@ export default function AppHeader() {
                   .filter((item) => {
                     const features = config?.features ?? { expenses: false, workers: false, stock: false };
                     const hasLedger = features.expenses || features.workers;
+                    if ("anyFeature" in item && item.anyFeature)
+                      return hasLedger || !!features.stock;
                     if ("ledger" in item && item.ledger) return hasLedger;
                     if ("feature" in item) {
                       const f = item.feature as keyof NonNullable<typeof config>["features"];
@@ -163,11 +188,15 @@ export default function AppHeader() {
                     }
                     return true;
                   })
-                  .map(({ href, label, icon: Icon }) => {
-                  const active = isActive(href);
+                  .map((item) => {
+                  const href = "dynamicHref" in item && typeof (item as { dynamicHref?: () => string }).dynamicHref === "function"
+                    ? (item as { dynamicHref: () => string }).dynamicHref()
+                    : item.href;
+                  const { label, icon: Icon } = item;
+                  const active = isActive(item.href);
                   return (
                     <Link
-                      key={href}
+                      key={item.href}
                       href={href}
                       onClick={() => setMenuOpen(false)}
                       className={`flex items-center gap-4 rounded-xl px-4 py-3.5 min-h-[48px] transition-colors active:scale-[0.98] ${

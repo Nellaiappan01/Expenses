@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useConfig } from "../context/ConfigContext";
 import type { Entry } from "@/lib/types";
@@ -29,6 +29,7 @@ function formatAmount(amount: number) {
 
 export default function TrackPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { config } = useConfig() ?? {};
   const [entries, setEntries] = useState<Entry[]>([]);
   const [names, setNames] = useState<NameWithTotal[]>([]);
@@ -38,14 +39,22 @@ export default function TrackPage() {
   const [total, setTotal] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const urlFrom = searchParams.get("from") ?? "";
+  const urlTo = searchParams.get("to") ?? "";
   const [filters, setFilters] = useState({
-    from: "",
-    to: "",
+    from: urlFrom,
+    to: urlTo,
     name: "",
     method: "",
     type: "",
     search: "",
   });
+
+  useEffect(() => {
+    if (urlFrom || urlTo) {
+      setFilters((f) => ({ ...f, from: urlFrom, to: urlTo }));
+    }
+  }, [urlFrom, urlTo]);
 
   const fetchNames = useCallback(async () => {
     try {

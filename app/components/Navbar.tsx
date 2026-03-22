@@ -9,6 +9,7 @@ const mainNavItems = [
   { href: "/totals", label: "Totals", icon: TotalsIcon, ledger: true },
   { href: "/track", label: "Track", icon: TrackIcon, ledger: true },
   { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
+  { href: "/stock/out", label: "Out", icon: StockOutIcon, feature: "stock" as const },
   { href: "/stock/dashboard", label: "Dashboard", icon: DashboardIcon, feature: "stock" as const },
   { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
 ];
@@ -53,6 +54,14 @@ function StockIcon({ active }: { active: boolean }) {
   );
 }
 
+function StockOutIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M20 12H4m0 0l4-4m-4 4l4 4" />
+    </svg>
+  );
+}
+
 function DashboardIcon({ active }: { active: boolean }) {
   return (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,6 +79,7 @@ export default function Navbar() {
   const isActive = (href: string) => {
     if (pathname === href) return true;
     if (href === "/stock") return pathname === "/stock" || pathname === "/stock/";
+    if (href === "/stock/out") return pathname === "/stock/out" || pathname.startsWith("/stock/out/");
     if (href !== "/") return pathname.startsWith(href);
     return false;
   };
