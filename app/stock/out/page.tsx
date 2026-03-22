@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useConfig } from "@/app/context/ConfigContext";
+import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 
 type StockItem = { _id: string; name: string; count: number };
 
@@ -283,7 +284,7 @@ export default function StockOutPage() {
                           {rec.name}
                         </p>
                         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                          {rec.count} out · {new Date(rec.date + "T12:00:00").toLocaleDateString("en-IN")}
+                          {rec.count} out · {formatDateDDMMYYYY(rec.date)}
                           {rec.note ? ` · ${rec.note}` : ""}
                         </p>
                       </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
 
 const DEFAULT_CONFIG = {
@@ -142,20 +143,15 @@ export async function GET(request: NextRequest) {
         { header: "Count", key: "count", width: 10 },
         { header: "Value/Unit (₹)", key: "valuePerUnit", width: 14 },
         { header: "Total Value (₹)", key: "totalValue", width: 14 },
-        { header: "Last Check", key: "lastCheck", width: 18 },
       ];
       ws.getRow(1).font = { bold: true };
       for (const i of items) {
         const total = (i.count ?? 0) * (i.valuePerUnit ?? 0);
-        const lastCheck = i.lastCheckAt
-          ? new Date(i.lastCheckAt).toLocaleString("en-IN")
-          : "";
         ws.addRow({
           name: i.name ?? "",
           count: i.count ?? 0,
           valuePerUnit: i.valuePerUnit ?? 0,
           totalValue: total.toFixed(2),
-          lastCheck,
         });
       }
 
@@ -163,15 +159,15 @@ export async function GET(request: NextRequest) {
         ws.addRow([]);
         ws.addRow(["Check History"]);
         ws.getRow(ws.rowCount).font = { bold: true };
-        ws.addRow(["Stock Name", "Check Date", "Current Stock", "Difference"]);
+        ws.addRow(["Check Date", "Stock Name", "Current Stock", "Difference"]);
         ws.getRow(ws.rowCount).font = { bold: true };
         for (const h of history) {
           const item = itemMap.get(h.stockId);
           const name = item?.name ?? h.stockId;
           const date = h.checkDate
-            ? new Date(h.checkDate).toLocaleString("en-IN")
+            ? formatDateDDMMYYYY(h.checkDate)
             : "";
-          ws.addRow([name, date, h.newCount, h.difference >= 0 ? `+${h.difference}` : h.difference]);
+          ws.addRow([date, name, h.newCount, h.difference >= 0 ? `+${h.difference}` : h.difference]);
         }
       }
     }

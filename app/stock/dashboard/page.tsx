@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import { useConfig } from "@/app/context/ConfigContext";
 
 type DashboardDay = {
@@ -18,12 +19,7 @@ type DashboardDay = {
 };
 
 function formatDashboardDate(dateStr: string) {
-  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-IN", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateDDMMYYYY(dateStr);
 }
 
 export default function StockDashboardPage() {

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useConfig } from "@/app/context/ConfigContext";
+import { formatDateTimeDDMMYYYY } from "@/lib/dateFormat";
 
 type StockItem = {
   _id: string;
@@ -22,13 +23,7 @@ type HistoryEntry = {
 };
 
 function formatDate(d: string) {
-  return new Date(d).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTimeDDMMYYYY(d);
 }
 
 function UpdateIcon() {

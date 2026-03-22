@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@/lib/dateFormat";
 
 function escapeCsv(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return "";
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
 
     if (historyOnly) {
       rows.push("Stock Check History");
-      rows.push(`Generated,${new Date().toISOString().split("T")[0]}`);
+      rows.push(`Generated,${formatDateDDMMYYYY(new Date())}`);
       rows.push("");
       rows.push(
         ["Stock Name", "Check Date", "Last check Date", "Current Stock", "Difference"].join(",")
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
         const item = itemMap.get(h.stockId);
         const name = item?.name ?? h.stockId;
         const date = h.checkDate
-          ? new Date(h.checkDate).toLocaleString("en-IN")
+          ? formatDateTimeDDMMYYYY(h.checkDate)
           : "";
         rows.push(
           [
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
       }
     } else {
       rows.push("Stock Check Report");
-      rows.push(`Generated,${new Date().toISOString().split("T")[0]}`);
+      rows.push(`Generated,${formatDateDDMMYYYY(new Date())}`);
       rows.push("");
 
       rows.push("Stock Summary");
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
       for (const i of items) {
         const total = (i.count ?? 0) * (i.valuePerUnit ?? 0);
         const lastCheck = i.lastCheckAt
-          ? new Date(i.lastCheckAt).toLocaleString("en-IN")
+          ? formatDateTimeDDMMYYYY(i.lastCheckAt)
           : "";
         rows.push(
           [
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
         const item = itemMap.get(h.stockId);
         const name = item?.name ?? h.stockId;
         const date = h.checkDate
-          ? new Date(h.checkDate).toLocaleString("en-IN")
+          ? formatDateTimeDDMMYYYY(h.checkDate)
           : "";
         rows.push(
           [
@@ -114,9 +115,10 @@ export async function GET(request: NextRequest) {
 
     const csv = rows.join("\n");
     const bom = "\uFEFF";
+    const dateStr = formatDateDDMMYYYY(new Date()).replace(/:/g, "-");
     const filename = historyOnly
-      ? `stock-history-${new Date().toISOString().split("T")[0]}.csv`
-      : `stock-report-${new Date().toISOString().split("T")[0]}.csv`;
+      ? `stock-history-${dateStr}.csv`
+      : `stock-report-${dateStr}.csv`;
 
     return new NextResponse(bom + csv, {
       headers: {

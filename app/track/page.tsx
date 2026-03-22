@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useConfig } from "../context/ConfigContext";
+import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
 
 interface NameWithTotal {
@@ -13,13 +14,7 @@ interface NameWithTotal {
 }
 
 function formatDate(isoDate: string) {
-  const d = new Date(isoDate);
-  return d.toLocaleDateString("en-IN", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateDDMMYYYY(isoDate);
 }
 
 function formatAmount(amount: number) {

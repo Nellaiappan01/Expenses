@@ -3,22 +3,19 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
 import EditEntrySheet, { EditIcon, TrashIcon } from "./EditEntrySheet";
 
 function formatDate(isoDate: string) {
-  const d = new Date(isoDate);
+  const d = new Date(isoDate.includes("T") ? isoDate : isoDate + "T12:00:00");
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
   if (d.toDateString() === today.toDateString()) return "Today";
   if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateDDMMYYYY(d);
 }
 
 function formatAmount(amount: number) {
@@ -241,7 +238,7 @@ export default function EntryList({
                             Date
                           </dt>
                           <dd className="text-zinc-900 dark:text-zinc-100">
-                            {new Date(entry.date).toLocaleDateString("en-IN")}
+                            {formatDateDDMMYYYY(entry.date)}
                           </dd>
                         </div>
                         {entry.bankName && (
