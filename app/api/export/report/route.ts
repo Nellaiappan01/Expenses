@@ -44,7 +44,42 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // Sheet 1: Expenses (expense, adjustment - exclude wallet)
+    // Fetch all entry totals first for Summary
+    let walletTotal = 0;
+    let expenseTotal = 0;
+    let workerTotal = 0;
+
+    if (features.expenses) {
+      const [expenseEntries, walletEntries] = await Promise.all([
+        db.collection<Entry>("entries").find({ ...entryMatch, type: { $in: ["expense", "adjustment"] as const } }).toArray(),
+        db.collection<Entry>("entries").find({ ...entryMatch, type: "rotation_cash" as const }).toArray(),
+      ]);
+      expenseTotal = expenseEntries.reduce((s, e) => s + e.amount, 0);
+      walletTotal = walletEntries.reduce((s, e) => s + e.amount, 0);
+    }
+    if (features.workers) {
+      const workerEntries = await db.collection<Entry>("entries").find({ ...entryMatch, type: "worker_payment" as const }).toArray();
+      workerTotal = workerEntries.reduce((s, e) => s + e.amount, 0);
+    }
+
+    // Sheet 1: Summary (totals + current value)
+    if (features.expenses || features.workers) {
+      const summaryWs = workbook.addWorksheet("Summary", { views: [{ state: "frozen", ySplit: 1 }] });
+      summaryWs.columns = [
+        { header: "Section", key: "label", width: 22 },
+        { header: "Amount (₹)", key: "amount", width: 18 },
+      ];
+      summaryWs.getRow(1).font = { bold: true };
+      summaryWs.addRow({ label: "Wallet Total", amount: walletTotal });
+      summaryWs.addRow({ label: "Expenses Total", amount: expenseTotal });
+      summaryWs.addRow({ label: "Workers Total", amount: workerTotal });
+      summaryWs.addRow([]);
+      const currentValue = walletTotal - Math.abs(expenseTotal) - Math.abs(workerTotal);
+      summaryWs.addRow({ label: "Current Value", amount: currentValue });
+      summaryWs.getRow(summaryWs.rowCount).font = { bold: true };
+    }
+
+    // Sheet 2: Expenses (expense, adjustment - exclude wallet)
     if (features.expenses) {
       const expenseMatch = {
         ...entryMatch,
@@ -68,7 +103,6 @@ export async function GET(request: NextRequest) {
         { header: "Note", key: "note", width: 24 },
       ];
       ws.getRow(1).font = { bold: true };
-      let expenseTotal = 0;
       for (const e of entries) {
         expenseTotal += e.amount;
         ws.addRow({
@@ -87,7 +121,7 @@ export async function GET(request: NextRequest) {
       ws.getRow(ws.rowCount).font = { bold: true };
     }
 
-    // Sheet 2: Wallet (rotation_cash)
+    // Sheet 3: Wallet (rotation_cash)
     if (features.expenses) {
       const walletMatch = {
         ...entryMatch,
@@ -110,7 +144,6 @@ export async function GET(request: NextRequest) {
         { header: "Note", key: "note", width: 24 },
       ];
       ws.getRow(1).font = { bold: true };
-      let walletTotal = 0;
       for (const e of entries) {
         walletTotal += e.amount;
         ws.addRow({
@@ -128,7 +161,7 @@ export async function GET(request: NextRequest) {
       ws.getRow(ws.rowCount).font = { bold: true };
     }
 
-    // Sheet 3: Workers (worker_payment)
+    // Sheet 4: Workers (worker_payment)
     if (features.workers) {
       const workerMatch = {
         ...entryMatch,
@@ -151,7 +184,6 @@ export async function GET(request: NextRequest) {
         { header: "Note", key: "note", width: 24 },
       ];
       ws.getRow(1).font = { bold: true };
-      let workerTotal = 0;
       for (const e of entries) {
         workerTotal += e.amount;
         ws.addRow({
@@ -169,7 +201,7 @@ export async function GET(request: NextRequest) {
       ws.getRow(ws.rowCount).font = { bold: true };
     }
 
-    // Sheet 4: Stock
+    // Sheet 5: Stock
     if (features.stock) {
       const items = await db
         .collection("stock")
