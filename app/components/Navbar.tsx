@@ -4,13 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConfig } from "@/app/context/ConfigContext";
 
-const mainNavItems = [
+/** Bottom bar on godown / stock in / out / dashboard — Claim is in header menu only. */
+const stockNavItems = [
+  { href: "/stock", label: "Godown", icon: StockIcon },
+  { href: "/stock/in", label: "In", icon: StockInIcon },
+  { href: "/stock/out", label: "Out", icon: StockOutIcon },
+  { href: "/stock/dashboard", label: "Report", icon: DashboardIcon },
+];
+
+const ledgerNavItems = [
   { href: "/", label: "Home", icon: HomeIcon, ledger: true },
   { href: "/totals", label: "Totals", icon: TotalsIcon, ledger: true },
   { href: "/track", label: "Track", icon: TrackIcon, ledger: true },
-  { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
-  { href: "/stock/out", label: "Out", icon: StockOutIcon, feature: "stock" as const },
-  { href: "/stock/dashboard", label: "Dashboard", icon: DashboardIcon, feature: "stock" as const },
   { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
 ];
 
@@ -54,6 +59,14 @@ function StockIcon({ active }: { active: boolean }) {
   );
 }
 
+function StockInIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M4 12h16m0 0l-4-4m4 4l-4 4" />
+    </svg>
+  );
+}
+
 function StockOutIcon({ active }: { active: boolean }) {
   return (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,34 +83,40 @@ function DashboardIcon({ active }: { active: boolean }) {
   );
 }
 
+function stockPathActive(pathname: string, href: string): boolean {
+  if (pathname === href) return true;
+  if (href === "/stock") return pathname === "/stock" || pathname === "/stock/";
+  if (href === "/stock/in") return pathname.startsWith("/stock/in");
+  if (href === "/stock/out") return pathname.startsWith("/stock/out");
+  if (href === "/stock/dashboard") return pathname.startsWith("/stock/dashboard");
+  return false;
+}
+
 export default function Navbar() {
   const pathname = usePathname();
   const { config } = useConfig() ?? {};
 
   if (pathname === "/select-user") return null;
 
-  const isActive = (href: string) => {
-    if (pathname === href) return true;
-    if (href === "/stock") return pathname === "/stock" || pathname === "/stock/";
-    if (href === "/stock/out") return pathname === "/stock/out" || pathname.startsWith("/stock/out/");
-    if (href !== "/") return pathname.startsWith(href);
-    return false;
-  };
-
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
-  const hasLedger = features.expenses || features.workers;
+  const hasStock = !!features.stock;
+  const onStockArea = pathname.startsWith("/stock");
 
-  const navItems = mainNavItems.filter((item) => {
-    if ("ledger" in item && item.ledger) return hasLedger;
-    if ("feature" in item) {
-      const f = item.feature as keyof NonNullable<typeof config>["features"];
-      return !!features[f];
-    }
-    return true;
-  });
+  const useStockBar = hasStock && onStockArea;
+
+  const navItems = useStockBar
+    ? stockNavItems
+    : ledgerNavItems.filter((item) => {
+        const hasLedger = features.expenses || features.workers;
+        if ("ledger" in item && item.ledger) return hasLedger;
+        return true;
+      });
+
+  const isActive = (href: string) =>
+    useStockBar ? stockPathActive(pathname, href) : pathname === href || (href !== "/" && pathname.startsWith(href));
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 pb-[env(safe-area-inset-bottom)]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)]">
       <div className="mx-auto flex max-w-md">
         {navItems.map(({ href, label, icon: Icon }) => {
           const active = isActive(href);
@@ -105,14 +124,14 @@ export default function Navbar() {
             <Link
               key={href}
               href={href}
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-2 py-3 min-h-[64px] transition-colors touch-manipulation select-none ${
-                active
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-zinc-500 active:text-zinc-700 dark:text-zinc-400 dark:active:text-zinc-200"
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2.5 min-h-[60px] transition-colors touch-manipulation select-none ${
+                active ? "text-emerald-600" : "text-zinc-500 active:text-zinc-700"
               }`}
             >
               <Icon active={active} />
-              <span className="text-[11px] font-medium leading-tight truncate max-w-full">{label}</span>
+              <span className="text-[10px] font-semibold leading-tight truncate max-w-full">
+                {label}
+              </span>
             </Link>
           );
         })}

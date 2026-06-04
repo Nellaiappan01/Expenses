@@ -13,7 +13,7 @@ import {
   type MovementRecord,
 } from "../components/StockMovementFlow";
 
-export default function StockOutPage() {
+export default function StockInPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { config } = useConfig() ?? {};
@@ -24,7 +24,6 @@ export default function StockOutPage() {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCount, setEditCount] = useState(1);
-  const [editNote, setEditNote] = useState("");
   const [editDate, setEditDate] = useState(() => toLocalDateString());
   const [editSaving, setEditSaving] = useState(false);
 
@@ -40,7 +39,7 @@ export default function StockOutPage() {
   }, []);
 
   const fetchRecords = useCallback(async () => {
-    const res = await apiFetch("/api/stock/out?limit=50");
+    const res = await apiFetch("/api/stock/in?limit=30");
     if (res.ok) setRecords(await res.json());
   }, []);
 
@@ -88,18 +87,16 @@ export default function StockOutPage() {
   async function handleSave(params: {
     stockId: string;
     count: number;
-    note?: string;
     date: string;
   }): Promise<boolean> {
     setError("");
     try {
-      const res = await apiFetch("/api/stock/out", {
+      const res = await apiFetch("/api/stock/in", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           stockId: params.stockId,
           count: params.count,
-          note: params.note,
           date: params.date || toLocalDateString(),
         }),
       });
@@ -119,7 +116,6 @@ export default function StockOutPage() {
   function openEdit(rec: MovementRecord) {
     setEditingId(rec._id);
     setEditCount(rec.count);
-    setEditNote(rec.note || "");
     setEditDate(rec.date || toLocalDateString());
   }
 
@@ -131,19 +127,19 @@ export default function StockOutPage() {
     e.preventDefault();
     if (!editingId) return;
     setEditSaving(true);
+    setError("");
     try {
-      const res = await apiFetch(`/api/stock/out/${editingId}`, {
+      const res = await apiFetch(`/api/stock/in/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          count: editCount,
-          note: editNote.trim() || undefined,
-          date: editDate,
-        }),
+        body: JSON.stringify({ count: editCount, date: editDate }),
       });
+      const data = await res.json();
       if (res.ok) {
         closeEdit();
         await Promise.all([fetchRecords(), fetchItems()]);
+      } else {
+        setError(data.error || "Update failed");
       }
     } finally {
       setEditSaving(false);
@@ -151,9 +147,9 @@ export default function StockOutPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this stock out record? Count will be restored.")) return;
+    if (!confirm("Delete this stock in record? Godown count will be reduced.")) return;
     try {
-      const res = await apiFetch(`/api/stock/out/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/stock/in/${id}`, { method: "DELETE" });
       if (res.ok) {
         if (editingId === id) closeEdit();
         await Promise.all([fetchRecords(), fetchItems()]);
@@ -165,21 +161,25 @@ export default function StockOutPage() {
 
   if (!config) return null;
 
+  const qtyParam = searchParams.get("qty");
+  const initialQty = qtyParam ? parseInt(qtyParam, 10) : undefined;
+
   return (
     <>
       <StockMovementFlow
-        mode="out"
+        mode="in"
         items={items}
         records={records}
         loading={loading}
         initialStockId={searchParams.get("stockId")}
+        initialQty={initialQty && initialQty > 0 ? initialQty : undefined}
         error={error}
         onSave={handleSave}
         onAddProduct={handleAddProduct}
         onRecordEdit={openEdit}
         onRecordDelete={handleDelete}
-        otherHref="/stock/in"
-        otherLabel="Stock In →"
+        otherHref="/stock/out"
+        otherLabel="Stock Out →"
         shopName={userName ?? undefined}
       />
 
@@ -192,7 +192,7 @@ export default function StockOutPage() {
             aria-label="Close"
           />
           <div className="nav-sheet fixed inset-x-0 bottom-0 z-[81] rounded-t-3xl bg-white p-4 pb-[env(safe-area-inset-bottom)]">
-            <h3 className="mb-4 text-lg font-bold text-zinc-900">Edit stock out</h3>
+            <h3 className="mb-4 text-lg font-bold text-zinc-900">Edit stock in</h3>
             <form onSubmit={handleEditSave} className="space-y-4">
               <div className="flex items-center justify-center gap-4">
                 <button
@@ -206,7 +206,7 @@ export default function StockOutPage() {
                 <button
                   type="button"
                   onClick={() => setEditCount((c) => c + 1)}
-                  className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-600 text-2xl font-bold text-white"
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl font-bold text-white"
                 >
                   +
                 </button>
@@ -223,13 +223,6 @@ export default function StockOutPage() {
                   className="min-w-0 flex-1 bg-transparent text-sm font-medium text-zinc-800"
                 />
               </label>
-              <input
-                type="text"
-                value={editNote}
-                onChange={(e) => setEditNote(e.target.value)}
-                placeholder="Note"
-                className="w-full rounded-xl bg-zinc-100 px-4 py-3 text-sm"
-              />
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -241,7 +234,7 @@ export default function StockOutPage() {
                 <button
                   type="submit"
                   disabled={editSaving}
-                  className="flex-1 rounded-2xl bg-red-600 py-3 font-bold text-white disabled:opacity-50"
+                  className="flex-1 rounded-2xl bg-emerald-600 py-3 font-bold text-white disabled:opacity-50"
                 >
                   {editSaving ? "Saving…" : "Save"}
                 </button>

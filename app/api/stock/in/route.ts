@@ -11,14 +11,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = Math.min(Number(searchParams.get("limit")) || 50, 100);
 
-    const items = await db
-      .collection("stock")
-      .find({ businessId: userId })
-      .toArray();
+    const items = await db.collection("stock").find({ businessId: userId }).toArray();
     const itemMap = new Map(items.map((i) => [i._id.toString(), i]));
 
     const records = await db
-      .collection("stock_out")
+      .collection("stock_in")
       .find({ businessId: userId })
       .sort({ date: -1, createdAt: -1 })
       .limit(limit)
@@ -36,7 +33,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(serialized);
   } catch (error) {
-    console.error("Stock out GET error:", error);
+    console.error("Stock in GET error:", error);
     return NextResponse.json([], { status: 500 });
   }
 }
@@ -50,8 +47,8 @@ export async function POST(request: NextRequest) {
     if (!stockId?.trim()) {
       return NextResponse.json({ error: "Stock item required" }, { status: 400 });
     }
-    const outCount = Number(count);
-    if (isNaN(outCount) || outCount <= 0) {
+    const inCount = Number(count);
+    if (isNaN(inCount) || inCount <= 0) {
       return NextResponse.json({ error: "Valid count required" }, { status: 400 });
     }
 
@@ -65,27 +62,20 @@ export async function POST(request: NextRequest) {
     }
 
     const currentCount = stockItem.count ?? 0;
-    if (currentCount < outCount) {
-      return NextResponse.json(
-        { error: `Only ${currentCount} available. Cannot take out ${outCount}.` },
-        { status: 400 }
-      );
-    }
-
     const dateStr = date || toLocalDateString();
     const now = new Date();
 
     const record = {
       stockId: stockItem._id.toString(),
       businessId: userId,
-      count: outCount,
+      count: inCount,
       note: (note || "").trim() || undefined,
       date: dateStr,
       createdAt: now,
     };
 
-    const result = await db.collection("stock_out").insertOne(record);
-    const newStockCount = currentCount - outCount;
+    const result = await db.collection("stock_in").insertOne(record);
+    const newStockCount = currentCount + inCount;
 
     await db.collection("stock").updateOne(
       { _id: stockItem._id, businessId: userId },
@@ -97,9 +87,9 @@ export async function POST(request: NextRequest) {
       businessId: userId,
       previousCount: currentCount,
       newCount: newStockCount,
-      difference: -outCount,
+      difference: inCount,
       checkDate: now,
-      note: (note || "").trim() || undefined,
+      note: (note || "").trim() || "Stock in",
       createdAt: now,
     });
 
@@ -109,7 +99,7 @@ export async function POST(request: NextRequest) {
       name: stockItem.name,
     });
   } catch (error) {
-    console.error("Stock out POST error:", error);
-    return NextResponse.json({ error: "Failed to record stock out" }, { status: 500 });
+    console.error("Stock in POST error:", error);
+    return NextResponse.json({ error: "Failed to record stock in" }, { status: 500 });
   }
 }

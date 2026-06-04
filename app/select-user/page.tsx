@@ -4,6 +4,19 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../context/UserContext";
 
+async function parseJsonResponse(res: Response): Promise<{ error?: string } & Record<string, unknown>> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as { error?: string } & Record<string, unknown>;
+  } catch {
+    throw new Error(
+      res.ok
+        ? "Invalid server response"
+        : "Server error. Restart the dev server (npm run dev) and try again."
+    );
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { setUser, clearUser } = useUser();
@@ -28,7 +41,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim(), password }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Login failed");
       setUser({
         token: data.token,
@@ -59,7 +72,7 @@ export default function LoginPage() {
           name: name.trim() || username.trim(),
         }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Registration failed");
       setUser({
         token: data.token,

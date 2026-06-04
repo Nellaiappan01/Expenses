@@ -35,6 +35,7 @@ export default function ReportPage() {
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   if (config && !features.expenses && !features.workers && !features.stock) return null;
   const hasLedger = features.expenses || features.workers;
+  const showDateRange = hasLedger || features.stock;
 
   function setDatePreset(preset: "today" | "week" | "month") {
     const { from: f, to: t } = getDateRange(preset);
@@ -83,16 +84,16 @@ export default function ReportPage() {
               Report
             </h1>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Download Excel with separate sheets per feature
+              Excel for Google Sheets · dates like 06 April 2026
             </p>
           </div>
         </header>
 
         <div className="space-y-6">
-          {hasLedger && (
+          {showDateRange && (
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Date Range (optional)
+              Date range (optional)
             </h2>
             <div className="mb-3 flex flex-wrap gap-2">
               <button
@@ -173,9 +174,15 @@ export default function ReportPage() {
                 </>
               )}
             </button>
+            {features.stock && (
+              <p className="text-center text-xs text-zinc-600 dark:text-zinc-400">
+                Stock sheets: Godown Stock · Stock In · Stock Out · Claim
+              </p>
+            )}
             <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
               Opens in Excel or Google Sheets.
-              {hasLedger && " Date & search apply to Expenses and Workers."}
+              {hasLedger && " Date range applies to ledger & stock movements."}
+              {features.stock && !hasLedger && " Date range applies to stock in, out & claims."}
             </p>
           </div>
         </div>
