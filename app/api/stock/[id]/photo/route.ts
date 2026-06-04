@@ -42,7 +42,7 @@ export async function GET(
       return new NextResponse(null, { status: 404 });
     }
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "image/jpeg",
         "Cache-Control": "private, max-age=3600",

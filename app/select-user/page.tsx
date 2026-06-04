@@ -4,10 +4,18 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../context/UserContext";
 
-async function parseJsonResponse(res: Response): Promise<{ error?: string } & Record<string, unknown>> {
+type AuthJson = {
+  error?: string;
+  token?: string;
+  userId?: string;
+  name?: string;
+  isAdmin?: boolean;
+};
+
+async function parseJsonResponse(res: Response): Promise<AuthJson> {
   const text = await res.text();
   try {
-    return JSON.parse(text) as { error?: string } & Record<string, unknown>;
+    return JSON.parse(text) as AuthJson;
   } catch {
     throw new Error(
       res.ok
@@ -43,10 +51,11 @@ export default function LoginPage() {
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Login failed");
+      if (!data.token || !data.userId) throw new Error("Invalid server response");
       setUser({
         token: data.token,
         userId: data.userId,
-        userName: data.name,
+        userName: data.name ?? data.userId,
         isAdmin: data.isAdmin,
       });
       router.push("/");
@@ -74,10 +83,11 @@ export default function LoginPage() {
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Registration failed");
+      if (!data.token || !data.userId) throw new Error("Invalid server response");
       setUser({
         token: data.token,
         userId: data.userId,
-        userName: data.name,
+        userName: data.name ?? data.userId,
         isAdmin: data.isAdmin,
       });
       router.push("/");

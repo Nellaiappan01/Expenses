@@ -14,8 +14,11 @@ type TallyItem = {
   lastCheckDiff: number | null;
 };
 
+type FlaggedStatus = Exclude<TallyItem["status"], "ok">;
+type FlaggedTallyItem = Omit<TallyItem, "status"> & { status: FlaggedStatus };
+
 export function StockMissingList({ days = 7 }: { days?: 7 | 15 | 30 }) {
-  const [items, setItems] = useState<TallyItem[]>([]);
+  const [items, setItems] = useState<FlaggedTallyItem[]>([]);
 
   useEffect(() => {
     apiFetch(`/api/stock/tally?days=${days}`)
@@ -23,14 +26,14 @@ export function StockMissingList({ days = 7 }: { days?: 7 | 15 | 30 }) {
       .then((data) => {
         const flagged = (data?.items ?? []).filter(
           (i: TallyItem) => i.status !== "ok"
-        ) as TallyItem[];
+        ) as FlaggedTallyItem[];
         setItems(flagged.slice(0, 8));
       });
   }, [days]);
 
   if (items.length === 0) return null;
 
-  const labels = {
+  const labels: Record<FlaggedStatus, { text: string; class: string }> = {
     missing: { text: "Out of stock", class: "bg-red-100 text-red-700" },
     low: { text: "Low", class: "bg-amber-100 text-amber-800" },
     shrink: { text: "Shrinkage", class: "bg-orange-100 text-orange-800" },
