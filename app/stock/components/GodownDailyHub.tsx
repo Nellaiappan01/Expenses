@@ -1,105 +1,59 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
-
-type TallyData = {
-  checkedToday: number;
-  summary: {
-    godownUnits: number;
-    itemCount: number;
-    inStockCount: number;
-    outOfStockCount: number;
-    checkedInStock: number;
-    checkedNil: number;
-    nilPending?: number;
-  };
-  eveningComplete?: boolean;
-};
+import { formatDateTimeDDMMYYYY } from "@/lib/dateFormat";
+import { itemsLastGodownCheck } from "@/lib/stockLastUpdate";
+import type { StockItem } from "@/lib/stockTypes";
 
 type Props = {
-  onStartEvening: () => void;
-  refreshKey?: number;
+  items: StockItem[];
+  onStartCheck: () => void;
 };
 
-export function GodownDailyHub({ onStartEvening, refreshKey = 0 }: Props) {
-  const [data, setData] = useState<TallyData | null>(null);
-  const [loading, setLoading] = useState(true);
+export function GodownDailyHub({ items, onStartCheck }: Props) {
+  if (items.length === 0) return null;
 
-  useEffect(() => {
-    setLoading(true);
-    apiFetch("/api/stock/tally?days=1")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [refreshKey]);
-
-  if (loading) {
-    return (
-      <div className="mb-5">
-        <div className="h-24 animate-pulse rounded-3xl bg-gradient-to-br from-zinc-100 to-zinc-200/80" />
-      </div>
-    );
-  }
-
-  if (!data) return null;
-
-  const s = data.summary;
-  const inStock = s.inStockCount ?? 0;
-  const nilCount = s.outOfStockCount ?? 0;
-  const checkedStock = s.checkedInStock ?? 0;
-  const checkedNil = s.checkedNil ?? 0;
-  const progress =
-    s.itemCount > 0 ? Math.round((data.checkedToday / s.itemCount) * 100) : 0;
+  const itemCount = items.length;
+  const godownUnits = items.reduce((sum, item) => sum + item.count, 0);
+  const lastGodownCheck = itemsLastGodownCheck(items);
 
   return (
     <div className="mb-5">
       <button
         type="button"
-        onClick={onStartEvening}
+        onClick={onStartCheck}
         className="stock-hub-stagger stock-hub-stagger-1 block w-full overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-600 p-[1px] text-left shadow-lg shadow-emerald-600/25 transition-transform active:scale-[0.99]"
       >
         <div className="rounded-[23px] bg-white/95 p-4 backdrop-blur-sm dark:bg-zinc-900/95">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
-                Evening check
+                Godown stock check
               </p>
-              <p className="text-2xl font-bold tabular-nums text-zinc-900">
-                {data.checkedToday}
-                <span className="text-lg font-medium text-zinc-400">/{s.itemCount}</span>
-              </p>
-              <p className="mt-1 text-xs text-zinc-600">
-                <span className="font-semibold text-emerald-700">
-                  {checkedStock}/{inStock}
-                </span>{" "}
-                in stock
-                {nilCount > 0 && (
-                  <>
-                    {" · "}
-                    <span className="font-semibold text-amber-700">
-                      {checkedNil}/{nilCount}
-                    </span>{" "}
-                    nil
-                  </>
-                )}
+              <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 ring-2 ring-amber-300/80 dark:bg-amber-950/30 dark:ring-amber-700/60">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                  Last check
+                </p>
+                <p className="text-sm font-bold tabular-nums text-amber-950 dark:text-amber-100">
+                  {lastGodownCheck
+                    ? formatDateTimeDDMMYYYY(lastGodownCheck)
+                    : "Not recorded yet"}
+                </p>
+              </div>
+              <p className="mt-2 text-xs text-zinc-600">
+                <span className="font-semibold text-zinc-800">{itemCount}</span> patterns
               </p>
             </div>
-            <div className="rounded-2xl bg-zinc-50 px-3 py-2 text-right ring-1 ring-zinc-100">
+            <div className="rounded-2xl bg-zinc-50 px-3 py-2 text-right ring-1 ring-zinc-100 dark:bg-zinc-800 dark:ring-zinc-700">
               <p className="text-[10px] font-medium text-zinc-500">Godown pcs</p>
-              <p className="text-lg font-bold tabular-nums text-zinc-900">
-                {s.godownUnits.toLocaleString("en-IN")}
+              <p className="text-lg font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+                {godownUnits.toLocaleString("en-IN")}
               </p>
             </div>
           </div>
 
-          <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-zinc-100">
-            <div
-              className="stock-progress-shine relative h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
-              style={{ width: `${Math.max(progress, 4)}%` }}
-            />
-          </div>
-
+          <p className="mt-3 text-center text-xs font-semibold text-emerald-700">
+            Tap to start stock check
+          </p>
         </div>
       </button>
     </div>

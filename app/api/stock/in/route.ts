@@ -74,29 +74,31 @@ export async function POST(request: NextRequest) {
       createdAt: now,
     };
 
-    const result = await db.collection("stock_in").insertOne(record);
     const newStockCount = currentCount + inCount;
 
-    await db.collection("stock").updateOne(
-      { _id: stockItem._id, businessId: userId },
-      { $set: { count: newStockCount, updatedAt: now } }
-    );
-
-    await db.collection("stock_history").insertOne({
-      stockId: stockItem._id.toString(),
-      businessId: userId,
-      previousCount: currentCount,
-      newCount: newStockCount,
-      difference: inCount,
-      checkDate: now,
-      note: (note || "").trim() || "Stock in",
-      createdAt: now,
-    });
+    const [insertResult] = await Promise.all([
+      db.collection("stock_in").insertOne(record),
+      db.collection("stock").updateOne(
+        { _id: stockItem._id, businessId: userId },
+        { $set: { count: newStockCount, updatedAt: now } }
+      ),
+      db.collection("stock_history").insertOne({
+        stockId: stockItem._id.toString(),
+        businessId: userId,
+        previousCount: currentCount,
+        newCount: newStockCount,
+        difference: inCount,
+        checkDate: now,
+        note: (note || "").trim() || "Stock in",
+        createdAt: now,
+      }),
+    ]);
 
     return NextResponse.json({
       ...record,
-      _id: result.insertedId.toString(),
+      _id: insertResult.insertedId.toString(),
       name: stockItem.name,
+      newStockCount,
     });
   } catch (error) {
     console.error("Stock in POST error:", error);

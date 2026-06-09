@@ -7,6 +7,7 @@ import { useConfig } from "@/app/context/ConfigContext";
 import { useUser } from "@/app/context/UserContext";
 import type { StockRequest } from "@/lib/stockRequestTypes";
 import { isValidMobile, sanitizeMobileInput } from "@/lib/phone";
+import { matchesStockSearch } from "@/lib/stockSearch";
 import type { StockFlowItem } from "../components/StockMovementFlow";
 import { OrderClaimFlow } from "../components/OrderClaimFlow";
 
@@ -122,9 +123,9 @@ export default function StockOrdersPage() {
   }
 
   const filteredItems = items.filter((it) => {
-    const q = addSearch.trim().toLowerCase();
+    const q = addSearch.trim();
     if (!q) return true;
-    return it.name.toLowerCase().includes(q);
+    return matchesStockSearch(it, q);
   });
 
   if (!config) return null;

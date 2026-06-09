@@ -13,6 +13,7 @@ import {
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { formatDateDDMMYYYY, formatDayMonthName, toLocalDateString } from "@/lib/dateFormat";
+import { scoreStockSearch } from "@/lib/stockSearch";
 import { compressImageFile } from "@/lib/stockTypes";
 import { StockThumbnail } from "../StockThumbnail";
 import { ShareWhatsAppButton } from "../ShareWhatsAppButton";
@@ -74,17 +75,6 @@ const THEMES: Record<"in" | "out", Theme> = {
     label: "Qty going out",
   },
 };
-
-function matchesSearch(item: StockFlowItem, q: string): boolean {
-  const s = q.trim().toLowerCase();
-  if (!s) return false;
-  return (
-    item.name.toLowerCase().includes(s) ||
-    (item.sku?.toLowerCase().includes(s) ?? false) ||
-    (item.brand?.toLowerCase().includes(s) ?? false) ||
-    (item.size?.toLowerCase().includes(s) ?? false)
-  );
-}
 
 type Props = {
   mode: "in" | "out";
@@ -276,8 +266,9 @@ export function StockMovementFlow({
     const q = query.trim();
     if (!q) return [];
     return sorted
-      .map((item, i) => ({ item, i }))
-      .filter(({ item }) => matchesSearch(item, q))
+      .map((item, i) => ({ item, i, score: scoreStockSearch(item, q) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
       .slice(0, 15);
   }, [sorted, query]);
 

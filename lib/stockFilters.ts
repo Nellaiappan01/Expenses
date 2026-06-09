@@ -1,6 +1,22 @@
 import type { StockFilter, StockItem, StockSort } from "./stockTypes";
+import { scoreStockSearch } from "./stockSearch";
 
 const STALE_DAYS = 30;
+
+function compareBySort(a: StockItem, b: StockItem, sort: StockSort): number {
+  if (sort === "count_desc") return b.count - a.count;
+  if (sort === "value_desc") {
+    return b.count * b.valuePerUnit - a.count * a.valuePerUnit;
+  }
+  if (sort === "last_check") {
+    const ta = a.lastCheckAt ? new Date(a.lastCheckAt).getTime() : 0;
+    const tb = b.lastCheckAt ? new Date(b.lastCheckAt).getTime() : 0;
+    return tb - ta;
+  }
+  if (a.count === 0 && b.count !== 0) return 1;
+  if (a.count !== 0 && b.count === 0) return -1;
+  return a.name.localeCompare(b.name);
+}
 
 export function filterAndSortItems(
   list: StockItem[],
@@ -8,7 +24,7 @@ export function filterAndSortItems(
   filter: StockFilter,
   sort: StockSort
 ): StockItem[] {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const now = Date.now();
   const staleMs = STALE_DAYS * 24 * 60 * 60 * 1000;
 
@@ -31,60 +47,20 @@ export function filterAndSortItems(
   }
 
   if (q) {
-    const tokens = q.split(/\s+/).filter(Boolean);
-    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    const scored = result
+      .map((item) => ({ item, score: scoreStockSearch(item, q) }))
+      .filter((x) => x.score > 0);
 
-    result = result
-      .map((item) => {
-        const haystack = [
-          item.name,
-          item.sku,
-          item.brand,
-          item.size,
-          item.category,
-          item.location,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        const name = normalize(haystack);
-        const nameLower = haystack.toLowerCase();
-        let score = 0;
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return compareBySort(a.item, b.item, sort);
+    });
 
-        if (name === q) score = 100;
-        else if (name.startsWith(q) || nameLower.startsWith(q)) score = 80;
-        else if (name.includes(q) || nameLower.includes(q)) score = 60;
-        else if (tokens.every((t) => name.includes(t) || nameLower.includes(t))) {
-          const matchedTokens = tokens.filter((t) => name.includes(t) || nameLower.includes(t)).length;
-          score = 40 + matchedTokens * 5;
-        } else {
-          const partialMatch = tokens.some((t) => name.includes(t) || nameLower.includes(t));
-          if (partialMatch) score = 20;
-          else return null;
-        }
-        return { item, score };
-      })
-      .filter((x): x is { item: StockItem; score: number } => x !== null)
-      .sort((a, b) => b.score - a.score)
-      .map((x) => x.item);
-  } else {
-    result = [...result];
+    return scored.map((x) => x.item);
   }
 
-  result.sort((a, b) => {
-    if (sort === "count_desc") return b.count - a.count;
-    if (sort === "value_desc") {
-      return b.count * b.valuePerUnit - a.count * a.valuePerUnit;
-    }
-    if (sort === "last_check") {
-      const ta = a.lastCheckAt ? new Date(a.lastCheckAt).getTime() : 0;
-      const tb = b.lastCheckAt ? new Date(b.lastCheckAt).getTime() : 0;
-      return tb - ta;
-    }
-    if (a.count === 0 && b.count !== 0) return 1;
-    if (a.count !== 0 && b.count === 0) return -1;
-    return a.name.localeCompare(b.name);
-  });
-
+  result = [...result];
+  result.sort((a, b) => compareBySort(a, b, sort));
   return result;
 }
 

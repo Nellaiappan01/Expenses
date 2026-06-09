@@ -34,21 +34,22 @@ export async function POST(
     const difference = newCount - previousCount;
     const now = new Date();
 
-    await db.collection("stock_history").insertOne({
-      stockId: id,
-      businessId: userId,
-      previousCount,
-      newCount,
-      difference,
-      checkDate: now,
-      createdAt: now,
-    });
-
-    const result = await db.collection("stock").findOneAndUpdate(
-      { _id: new ObjectId(id), businessId: userId },
-      { $set: { count: newCount, lastCheckAt: now, updatedAt: now } },
-      { returnDocument: "after" }
-    );
+    const [, result] = await Promise.all([
+      db.collection("stock_history").insertOne({
+        stockId: id,
+        businessId: userId,
+        previousCount,
+        newCount,
+        difference,
+        checkDate: now,
+        createdAt: now,
+      }),
+      db.collection("stock").findOneAndUpdate(
+        { _id: new ObjectId(id), businessId: userId },
+        { $set: { count: newCount, lastCheckAt: now, updatedAt: now } },
+        { returnDocument: "after" }
+      ),
+    ]);
 
     return NextResponse.json({
       ...result,
@@ -57,6 +58,7 @@ export async function POST(
       newCount,
       difference,
       lastCheckAt: result?.lastCheckAt?.toISOString?.(),
+      updatedAt: result?.updatedAt?.toISOString?.(),
     });
   } catch (error) {
     console.error("Stock check error:", error);

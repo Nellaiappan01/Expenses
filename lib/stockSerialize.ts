@@ -8,6 +8,7 @@ export function serializeStockItem(i: Record<string, unknown>) {
     count: Number(i.count) || 0,
     valuePerUnit: Number(i.valuePerUnit) || 0,
     lastCheckAt: (i.lastCheckAt as Date)?.toISOString?.() ?? null,
+    updatedAt: (i.updatedAt as Date)?.toISOString?.() ?? null,
     sku: i.sku ?? "",
     brand: i.brand ?? "",
     size: i.size ?? "",

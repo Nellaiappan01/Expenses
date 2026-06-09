@@ -73,6 +73,24 @@ export async function GET(request: NextRequest) {
     let checkedInStock = 0;
     let checkedNil = 0;
 
+    const openingBulk: { updateOne: { filter: object; update: object } }[] = [];
+    const now = new Date();
+    for (const item of items) {
+      if (item.openingCount === undefined || item.openingCount === null) {
+        const godown = item.count ?? 0;
+        openingBulk.push({
+          updateOne: {
+            filter: { _id: item._id, businessId: userId },
+            update: { $set: { openingCount: godown, updatedAt: now } },
+          },
+        });
+        item.openingCount = godown;
+      }
+    }
+    if (openingBulk.length > 0) {
+      await db.collection("stock").bulkWrite(openingBulk, { ordered: false });
+    }
+
     const itemRows = [];
     for (const item of items) {
       const id = item._id.toString();
@@ -81,14 +99,7 @@ export async function GET(request: NextRequest) {
       const totalIn = totalInByStock.get(id) ?? 0;
       const totalOut = totalOutByStock.get(id) ?? 0;
 
-      let openingCount = item.openingCount as number | undefined;
-      if (openingCount === undefined || openingCount === null) {
-        openingCount = godown;
-        await db.collection("stock").updateOne(
-          { _id: item._id, businessId: userId },
-          { $set: { openingCount: godown, updatedAt: new Date() } }
-        );
-      }
+      const openingCount = (item.openingCount as number) ?? godown;
 
       const tally = computeItemTally({
         godown,

@@ -102,7 +102,31 @@ export default function StockInPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        await Promise.all([fetchRecords(), fetchItems()]);
+        const added = params.count;
+        const newCount =
+          typeof data.newStockCount === "number"
+            ? data.newStockCount
+            : undefined;
+        setItems((prev) =>
+          prev.map((i) =>
+            i._id === params.stockId
+              ? { ...i, count: newCount ?? i.count + added }
+              : i
+          )
+        );
+        setRecords((prev) =>
+          [
+            {
+              _id: data._id,
+              stockId: data.stockId,
+              name: data.name,
+              count: data.count,
+              date: data.date,
+              createdAt: data.createdAt,
+            },
+            ...prev,
+          ].slice(0, 30)
+        );
         return true;
       }
       setError(data.error || "Failed to save");

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { isPublicRoute } from "@/lib/publicRoutes";
 
 const USER_KEY = "ledger_user_id";
 
@@ -11,7 +12,7 @@ export default function RequireUser({ children }: { children: React.ReactNode })
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (pathname === "/select-user") {
+    if (pathname === "/select-user" || isPublicRoute(pathname)) {
       setChecked(true);
       return;
     }
@@ -29,7 +30,7 @@ export default function RequireUser({ children }: { children: React.ReactNode })
     setChecked(true);
   }, [pathname, router]);
 
-  if (pathname === "/select-user") {
+  if (pathname === "/select-user" || isPublicRoute(pathname)) {
     return <>{children}</>;
   }
   if (!checked) {

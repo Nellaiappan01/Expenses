@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useConfig } from "../context/ConfigContext";
 import { useUser } from "../context/UserContext";
 import { apiFetch } from "@/lib/api";
+import { isPublicRoute } from "@/lib/publicRoutes";
 
 function getTodayHref() {
   const today = new Date().toISOString().split("T")[0];
@@ -129,7 +130,7 @@ export default function AppHeader() {
     router.refresh();
   }
 
-  if (pathname === "/select-user") return null;
+  if (pathname === "/select-user" || isPublicRoute(pathname)) return null;
 
   const isActive = (href: string) =>
     pathname === href || (href !== "/" && pathname.startsWith(href));

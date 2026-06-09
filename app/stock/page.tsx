@@ -8,6 +8,7 @@ import { useConfig } from "@/app/context/ConfigContext";
 import { useUser } from "@/app/context/UserContext";
 import { ShareWhatsAppButton } from "./ShareWhatsAppButton";
 import { formatDateTimeDDMMYYYY } from "@/lib/dateFormat";
+import { stockLastUserUpdate } from "@/lib/stockLastUpdate";
 import { filterAndSortItems, stockStats } from "@/lib/stockFilters";
 import type { StockFilter, StockItem, StockSort } from "@/lib/stockTypes";
 import { StockThumbnail } from "./StockThumbnail";
@@ -110,7 +111,6 @@ export default function StockPage() {
   const [checkSaving, setCheckSaving] = useState(false);
   const [pageMode, setPageMode] = useState<"daily" | "inventory">("daily");
   const [eveningOpen, setEveningOpen] = useState(false);
-  const [tallyRefresh, setTallyRefresh] = useState(0);
 
   useEffect(() => {
     if (config && !config.features?.stock) {
@@ -274,7 +274,12 @@ export default function StockPage() {
         setItems((prev) =>
           prev.map((i) =>
             i._id === updatingId
-              ? { ...i, count: data.newCount, lastCheckAt: data.lastCheckAt }
+              ? {
+                  ...i,
+                  count: data.newCount,
+                  lastCheckAt: data.lastCheckAt,
+                  updatedAt: data.updatedAt ?? data.lastCheckAt,
+                }
               : i
           )
         );
@@ -520,19 +525,26 @@ export default function StockPage() {
         )}
 
         {pageMode === "daily" && items.length > 0 && (
-          <GodownDailyHub
-            refreshKey={tallyRefresh}
-            onStartEvening={() => setEveningOpen(true)}
-          />
+          <GodownDailyHub items={items} onStartCheck={() => setEveningOpen(true)} />
         )}
 
         {eveningOpen && items.length > 0 && (
           <EveningCheckPanel
             items={items}
             onClose={() => setEveningOpen(false)}
-            onSaved={() => {
-              fetchItems();
-              setTallyRefresh((n) => n + 1);
+            onSaved={(update) => {
+              setItems((prev) =>
+                prev.map((i) =>
+                  i._id === update.id
+                    ? {
+                        ...i,
+                        count: update.count,
+                        lastCheckAt: update.lastCheckAt,
+                        updatedAt: update.updatedAt ?? update.lastCheckAt,
+                      }
+                    : i
+                )
+              );
             }}
           />
         )}
@@ -580,6 +592,12 @@ export default function StockPage() {
                   </button>
                 )}
               </div>
+              {searchQuery.trim() && (
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  {filteredItems.length} result{filteredItems.length === 1 ? "" : "s"} for &ldquo;
+                  {searchQuery.trim()}&rdquo;
+                </p>
+              )}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {FILTERS.map((f) => (
                   <button
@@ -634,6 +652,7 @@ export default function StockPage() {
               ) : (
                 filteredItems.map((item) => {
                   const status = stockStatus(item);
+                  const lastUpdate = stockLastUserUpdate(item);
                   return (
                     <article
                       key={item._id}
@@ -717,9 +736,14 @@ export default function StockPage() {
                               {item.count}
                             </span>
                           </div>
-                          <span className="max-w-[4.5rem] text-right text-[10px] leading-tight text-zinc-400">
-                            {item.lastCheckAt ? formatDate(item.lastCheckAt) : "Never checked"}
-                          </span>
+                          <div className="max-w-[6.5rem] text-right">
+                            <p className="text-[9px] font-bold uppercase text-amber-700 dark:text-amber-400">
+                              Last update
+                            </p>
+                            <span className="mt-0.5 inline-block rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-100 dark:ring-amber-800">
+                              {lastUpdate ? formatDate(lastUpdate) : "Not yet"}
+                            </span>
+                          </div>
                         </div>
                       </button>
                       <div className="flex border-t border-zinc-100 dark:border-zinc-800">

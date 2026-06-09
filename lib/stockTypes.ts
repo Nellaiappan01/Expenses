@@ -4,6 +4,7 @@ export type StockItem = {
   count: number;
   valuePerUnit: number;
   lastCheckAt: string | null;
+  updatedAt?: string | null;
   sku?: string;
   brand?: string;
   size?: string;

@@ -2,13 +2,21 @@
 
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
+import { scoreStockSearch } from "@/lib/stockSearch";
 import type { StockItem } from "@/lib/stockTypes";
 import { StockThumbnail } from "../StockThumbnail";
+
+export type EveningCheckSave = {
+  id: string;
+  count: number;
+  lastCheckAt: string;
+  updatedAt?: string;
+};
 
 type Props = {
   items: StockItem[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (update: EveningCheckSave) => void;
 };
 
 const SWIPE_THRESHOLD = 48;
@@ -38,17 +46,6 @@ function firstUncheckedIndex(items: StockItem[], doneIds: Set<string>): number {
   const sorted = sortEveningItems(items, doneIds);
   const i = sorted.findIndex((it) => !doneIds.has(it._id));
   return i >= 0 ? i : 0;
-}
-
-function matchesSearch(item: StockItem, q: string): boolean {
-  const s = q.trim().toLowerCase();
-  if (!s) return false;
-  return (
-    item.name.toLowerCase().includes(s) ||
-    (item.sku?.toLowerCase().includes(s) ?? false) ||
-    (item.brand?.toLowerCase().includes(s) ?? false) ||
-    (item.size?.toLowerCase().includes(s) ?? false)
-  );
 }
 
 export function EveningCheckPanel({ items, onClose, onSaved }: Props) {
@@ -105,8 +102,9 @@ export function EveningCheckPanel({ items, onClose, onSaved }: Props) {
     const q = query.trim();
     if (!q) return [];
     return sorted
-      .map((item, i) => ({ item, i }))
-      .filter(({ item }) => matchesSearch(item, q))
+      .map((item, i) => ({ item, i, score: scoreStockSearch(item, q) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
       .slice(0, 15);
   }, [sorted, query]);
 
@@ -148,20 +146,16 @@ export function EveningCheckPanel({ items, onClose, onSaved }: Props) {
   }
 
   const listEntries = useMemo(() => {
-    const q = listQuery.trim().toLowerCase();
+    const q = listQuery.trim();
     return sorted
-      .map((item, i) => ({ item, i }))
-      .filter(({ item }) => {
+      .map((item, i) => ({ item, i, score: q ? scoreStockSearch(item, q) : 1 }))
+      .filter(({ item, score }) => {
         if (listFilter === "pending" && doneIds.has(item._id)) return false;
         if (listFilter === "done" && !doneIds.has(item._id)) return false;
-        if (!q) return true;
-        return (
-          item.name.toLowerCase().includes(q) ||
-          (item.sku?.toLowerCase().includes(q) ?? false) ||
-          (item.brand?.toLowerCase().includes(q) ?? false) ||
-          (item.size?.toLowerCase().includes(q) ?? false)
-        );
-      });
+        if (q && score <= 0) return false;
+        return true;
+      })
+      .sort((a, b) => (q ? b.score - a.score : 0));
   }, [sorted, listFilter, doneIds, listQuery]);
 
   function jumpToNil() {
@@ -244,10 +238,16 @@ export function EveningCheckPanel({ items, onClose, onSaved }: Props) {
         body: JSON.stringify({ count: Number(draftCount) }),
       });
       if (res.ok) {
+        const data = await res.json();
         const newDone = new Set(doneIds).add(current._id);
         setDoneIds(newDone);
         setJustSaved(true);
-        onSaved();
+        onSaved({
+          id: current._id,
+          count: data.newCount ?? Number(draftCount),
+          lastCheckAt: data.lastCheckAt ?? new Date().toISOString(),
+          updatedAt: data.updatedAt ?? data.lastCheckAt ?? new Date().toISOString(),
+        });
         if (navigator.vibrate) navigator.vibrate([8, 40, 8]);
         setTimeout(() => setJustSaved(false), 520);
         if (advance) {
@@ -286,7 +286,7 @@ export function EveningCheckPanel({ items, onClose, onSaved }: Props) {
           aria-label="Close"
         />
         <div className="nav-sheet fixed inset-0 z-[71] flex flex-col items-center justify-center bg-white p-6">
-          <p className="text-lg font-semibold text-emerald-700">All done for today</p>
+          <p className="text-lg font-semibold text-emerald-700">Stock check complete</p>
           <button
             type="button"
             onClick={onClose}
@@ -624,7 +624,7 @@ export function EveningCheckPanel({ items, onClose, onSaved }: Props) {
 
             {isDone && (
               <span className="evening-check-pop mb-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
-                ✓ Checked today
+                ✓ Checked
               </span>
             )}
 

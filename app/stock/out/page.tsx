@@ -105,7 +105,32 @@ export default function StockOutPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        await Promise.all([fetchRecords(), fetchItems()]);
+        const removed = params.count;
+        const newCount =
+          typeof data.newStockCount === "number"
+            ? data.newStockCount
+            : undefined;
+        setItems((prev) =>
+          prev.map((i) =>
+            i._id === params.stockId
+              ? { ...i, count: newCount ?? Math.max(0, i.count - removed) }
+              : i
+          )
+        );
+        setRecords((prev) =>
+          [
+            {
+              _id: data._id,
+              stockId: data.stockId,
+              name: data.name,
+              count: data.count,
+              note: data.note,
+              date: data.date,
+              createdAt: data.createdAt,
+            },
+            ...prev,
+          ].slice(0, 30)
+        );
         return true;
       }
       setError(data.error || "Failed to save");

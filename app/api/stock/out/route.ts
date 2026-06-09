@@ -84,29 +84,31 @@ export async function POST(request: NextRequest) {
       createdAt: now,
     };
 
-    const result = await db.collection("stock_out").insertOne(record);
     const newStockCount = currentCount - outCount;
 
-    await db.collection("stock").updateOne(
-      { _id: stockItem._id, businessId: userId },
-      { $set: { count: newStockCount, updatedAt: now } }
-    );
-
-    await db.collection("stock_history").insertOne({
-      stockId: stockItem._id.toString(),
-      businessId: userId,
-      previousCount: currentCount,
-      newCount: newStockCount,
-      difference: -outCount,
-      checkDate: now,
-      note: (note || "").trim() || undefined,
-      createdAt: now,
-    });
+    const [insertResult] = await Promise.all([
+      db.collection("stock_out").insertOne(record),
+      db.collection("stock").updateOne(
+        { _id: stockItem._id, businessId: userId },
+        { $set: { count: newStockCount, updatedAt: now } }
+      ),
+      db.collection("stock_history").insertOne({
+        stockId: stockItem._id.toString(),
+        businessId: userId,
+        previousCount: currentCount,
+        newCount: newStockCount,
+        difference: -outCount,
+        checkDate: now,
+        note: (note || "").trim() || undefined,
+        createdAt: now,
+      }),
+    ]);
 
     return NextResponse.json({
       ...record,
-      _id: result.insertedId.toString(),
+      _id: insertResult.insertedId.toString(),
       name: stockItem.name,
+      newStockCount,
     });
   } catch (error) {
     console.error("Stock out POST error:", error);

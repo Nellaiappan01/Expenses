@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConfig } from "@/app/context/ConfigContext";
+import { isPublicRoute } from "@/lib/publicRoutes";
 
 /** Bottom bar on godown / stock in / out / dashboard — Claim is in header menu only. */
 const stockNavItems = [
@@ -97,6 +98,8 @@ export default function Navbar() {
   const { config } = useConfig() ?? {};
 
   if (pathname === "/select-user") return null;
+
+  if (isPublicRoute(pathname)) return null;
 
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   const hasStock = !!features.stock;
