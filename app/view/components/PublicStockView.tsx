@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { addLocalDays, formatDayMonthYear, toLocalDateString } from "@/lib/dateFormat";
+import { createPortal } from "react-dom";
+import { addLocalDays, formatDayMonthYear, formatTimeHHMM, toLocalDateString } from "@/lib/dateFormat";
 import { matchesStockSearch, scoreStockSearch } from "@/lib/stockSearch";
 import {
   defaultPublicStockDateRange,
   type PublicStockActivity,
+  type PublicStockReceipt,
   type PublicStockSale,
   type StockViewStatus,
 } from "@/lib/publicStockTypes";
@@ -29,6 +31,7 @@ type StockItem = {
   subtitle: string;
   status: StockViewStatus;
   lastCheckAt: string | null;
+  updatedAt?: string | null;
   activity?: PublicStockActivity;
   hasPhoto?: boolean;
   photoUrl?: string;
@@ -54,7 +57,9 @@ type Payload = {
   lastUserUpdateAt?: string | null;
   items: StockItem[];
   sales?: PublicStockSale[];
+  receipts?: PublicStockReceipt[];
   salesSummary?: { totalPcs: number; count: number };
+  receiptsSummary?: { totalPcs: number; count: number };
   dateRange?: { from: string; to: string };
 };
 
@@ -91,12 +96,6 @@ const STATUS_META: Record<
   },
 };
 
-const QUICK_STATUS: { id: "" | StockViewStatus; label: string }[] = [
-  { id: "", label: "All" },
-  { id: "in", label: "Available" },
-  { id: "out", label: "Out of stock" },
-];
-
 type StatKey = "all" | "in" | "out" | "pcs" | "sales";
 
 const STAT_FILTER: Record<StatKey, "" | StockViewStatus> = {
@@ -106,6 +105,65 @@ const STAT_FILTER: Record<StatKey, "" | StockViewStatus> = {
   pcs: "",
   sales: "",
 };
+
+const RECEIPT_DATE_THEMES = [
+  {
+    section:
+      "rounded-2xl border border-emerald-200/50 bg-gradient-to-br from-emerald-400/20 via-white/40 to-emerald-50/25 p-2 shadow-[0_8px_24px_rgba(16,185,129,0.12)] backdrop-blur-md",
+    header:
+      "rounded-xl border border-white/70 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-sm",
+    dot: "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.55)]",
+    title: "text-emerald-950",
+    badge: "bg-emerald-500/25 text-emerald-900 ring-1 ring-emerald-300/60 backdrop-blur-sm",
+    row: "rounded-xl border border-white/70 bg-white/50 px-3 py-3 shadow-sm backdrop-blur-sm transition hover:bg-white/75 hover:shadow-md active:scale-[0.99]",
+    qty: "rounded-lg bg-emerald-500/20 px-2.5 py-1 text-sm font-bold text-emerald-900 ring-1 ring-emerald-400/35 backdrop-blur-sm",
+    time: "text-emerald-800/60",
+    note: "text-emerald-900/85",
+    noteLabel: "text-emerald-700",
+  },
+  {
+    section:
+      "rounded-2xl border border-teal-200/50 bg-gradient-to-br from-teal-400/20 via-white/40 to-cyan-50/25 p-2 shadow-[0_8px_24px_rgba(20,184,166,0.12)] backdrop-blur-md",
+    header:
+      "rounded-xl border border-white/70 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-sm",
+    dot: "bg-teal-500 shadow-[0_0_10px_rgba(20,184,166,0.55)]",
+    title: "text-teal-950",
+    badge: "bg-teal-500/25 text-teal-900 ring-1 ring-teal-300/60 backdrop-blur-sm",
+    row: "rounded-xl border border-white/70 bg-white/50 px-3 py-3 shadow-sm backdrop-blur-sm transition hover:bg-white/75 hover:shadow-md active:scale-[0.99]",
+    qty: "rounded-lg bg-teal-500/20 px-2.5 py-1 text-sm font-bold text-teal-900 ring-1 ring-teal-400/35 backdrop-blur-sm",
+    time: "text-teal-800/60",
+    note: "text-teal-900/85",
+    noteLabel: "text-teal-700",
+  },
+  {
+    section:
+      "rounded-2xl border border-cyan-200/50 bg-gradient-to-br from-cyan-400/20 via-white/40 to-sky-50/25 p-2 shadow-[0_8px_24px_rgba(6,182,212,0.12)] backdrop-blur-md",
+    header:
+      "rounded-xl border border-white/70 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-sm",
+    dot: "bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.55)]",
+    title: "text-cyan-950",
+    badge: "bg-cyan-500/25 text-cyan-900 ring-1 ring-cyan-300/60 backdrop-blur-sm",
+    row: "rounded-xl border border-white/70 bg-white/50 px-3 py-3 shadow-sm backdrop-blur-sm transition hover:bg-white/75 hover:shadow-md active:scale-[0.99]",
+    qty: "rounded-lg bg-cyan-500/20 px-2.5 py-1 text-sm font-bold text-cyan-900 ring-1 ring-cyan-400/35 backdrop-blur-sm",
+    time: "text-cyan-800/60",
+    note: "text-cyan-900/85",
+    noteLabel: "text-cyan-700",
+  },
+  {
+    section:
+      "rounded-2xl border border-sky-200/50 bg-gradient-to-br from-sky-400/20 via-white/40 to-blue-50/25 p-2 shadow-[0_8px_24px_rgba(14,165,233,0.12)] backdrop-blur-md",
+    header:
+      "rounded-xl border border-white/70 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-sm",
+    dot: "bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.55)]",
+    title: "text-sky-950",
+    badge: "bg-sky-500/25 text-sky-900 ring-1 ring-sky-300/60 backdrop-blur-sm",
+    row: "rounded-xl border border-white/70 bg-white/50 px-3 py-3 shadow-sm backdrop-blur-sm transition hover:bg-white/75 hover:shadow-md active:scale-[0.99]",
+    qty: "rounded-lg bg-sky-500/20 px-2.5 py-1 text-sm font-bold text-sky-900 ring-1 ring-sky-400/35 backdrop-blur-sm",
+    time: "text-sky-800/60",
+    note: "text-sky-900/85",
+    noteLabel: "text-sky-700",
+  },
+] as const;
 
 function formatClock(d: Date): string {
   return d.toLocaleTimeString("en-IN", {
@@ -193,15 +251,115 @@ function DoNotDisturbIcon({ className }: { className?: string }) {
   );
 }
 
+function LastStockUpdateSheet({
+  open,
+  lastUserUpdateAt,
+  refreshing,
+  onClose,
+  onRefresh,
+}: {
+  open: boolean;
+  lastUserUpdateAt?: string | null;
+  refreshing: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!mounted || !open) return null;
+
+  return createPortal(
+    <>
+      <button
+        type="button"
+        className="nav-sheet-backdrop fixed inset-0 z-[80] bg-black/55 backdrop-blur-sm"
+        aria-label="Close"
+        onClick={onClose}
+      />
+      <div className="nav-sheet fixed inset-x-0 bottom-0 z-[81] mx-auto w-full max-w-lg overflow-hidden rounded-t-3xl bg-white shadow-2xl">
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-200" />
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 ring-1 ring-amber-200">
+              <DoNotDisturbIcon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                Last stock update
+              </p>
+              {lastUserUpdateAt ? (
+                <>
+                  <p className="mt-1 text-base font-bold text-amber-950">
+                    {formatDayMonthYear(lastUserUpdateAt)} ·{" "}
+                    {formatClock(new Date(lastUserUpdateAt))}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-amber-700">
+                    Not live — updated when shop changes stock
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm font-semibold text-amber-900">No shop update recorded yet</p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-xl p-2 text-slate-400 hover:bg-slate-100"
+            aria-label="Close"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex gap-2 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 text-sm font-bold text-white disabled:opacity-60"
+          >
+            <RefreshIcon spinning={refreshing} />
+            {refreshing ? "Refreshing…" : "Refresh page"}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl bg-slate-100 px-5 py-3 text-sm font-bold text-slate-700"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
 function StockSubtitle({ text }: { text: string }) {
   const normalized = text.trim();
-  const match = normalized.match(/^(Real-time)\s+(stock status)\s+(of all tyre patterns)\.?$/i);
+  const match = normalized.match(/^(Real-time)\s+(stock status)\.?$/i);
   if (match) {
     return (
       <p className="mt-1 max-w-md text-sm font-semibold leading-snug">
         <span className="text-emerald-600">{match[1]}</span>{" "}
-        <span className="text-amber-500">{match[2]}</span>{" "}
-        <span className="text-slate-600">{match[3]}</span>
+        <span className="text-amber-500">{match[2]}</span>
       </p>
     );
   }
@@ -349,14 +507,96 @@ function DiffBadge({ net }: { net: number }) {
   );
 }
 
-function activityDateKey(item: StockItem): string | null {
-  if (item.activity?.lastActivityAt) {
-    return toLocalDateString(new Date(item.activity.lastActivityAt));
+type DayMovementRow = {
+  stockId: string;
+  name: string;
+  date: string;
+  count: number;
+  status: StockViewStatus;
+  periodIn: number;
+  periodOut: number;
+};
+
+function buildDayMovementsByDate(
+  receipts: PublicStockReceipt[],
+  sales: PublicStockSale[],
+  items: StockItem[],
+  statKey: "all" | "out" | "pcs",
+  search: string
+): { groups: [string, DayMovementRow[]][]; unchanged: StockItem[] } {
+  const itemMap = new Map(items.map((i) => [i._id, i]));
+  const cells = new Map<string, DayMovementRow>();
+
+  function touch(date: string, stockId: string, kind: "in" | "out", count: number) {
+    const key = `${date}|${stockId}`;
+    let row = cells.get(key);
+    if (!row) {
+      const item = itemMap.get(stockId);
+      row = {
+        stockId,
+        name: item?.name ?? stockId,
+        date,
+        count: item?.count ?? 0,
+        status: item?.status ?? "out",
+        periodIn: 0,
+        periodOut: 0,
+      };
+      cells.set(key, row);
+    }
+    if (kind === "in") row.periodIn += count;
+    else row.periodOut += count;
   }
-  if (item.lastCheckAt) {
-    return toLocalDateString(new Date(item.lastCheckAt));
+
+  for (const r of receipts) touch(r.date, r.stockId, "in", r.count);
+  for (const s of sales) touch(s.date, s.stockId, "out", s.count);
+
+  const q = search.trim();
+  let rows = [...cells.values()].filter((r) => r.periodIn > 0 || r.periodOut > 0);
+
+  if (statKey === "out") {
+    rows = rows.filter((r) => itemMap.get(r.stockId)?.status === "out");
   }
-  return null;
+
+  if (q) {
+    rows = rows.filter((r) => {
+      const item = itemMap.get(r.stockId);
+      return item ? matchesStockSearch(item, q) : r.name.toLowerCase().includes(q.toLowerCase());
+    });
+  }
+
+  const groups = new Map<string, DayMovementRow[]>();
+  for (const row of rows) {
+    const bucket = groups.get(row.date) ?? [];
+    bucket.push(row);
+    groups.set(row.date, bucket);
+  }
+
+  const sorted = [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  for (const [, bucket] of sorted) {
+    if (statKey === "pcs") {
+      bucket.sort((a, b) => b.count - a.count);
+    } else {
+      bucket.sort(
+        (a, b) =>
+          Math.abs(b.periodIn - b.periodOut) - Math.abs(a.periodIn - a.periodOut)
+      );
+    }
+  }
+
+  const movedIds = new Set(rows.map((r) => r.stockId));
+  let unchanged = items.filter((i) => !movedIds.has(i._id));
+  if (statKey === "out") unchanged = unchanged.filter((i) => i.status === "out");
+  if (q) {
+    unchanged = unchanged
+      .filter((i) => matchesStockSearch(i, q))
+      .sort((a, b) => scoreStockSearch(b, q) - scoreStockSearch(a, q));
+  } else if (statKey === "pcs") {
+    unchanged = [...unchanged].sort((a, b) => b.count - a.count);
+  } else {
+    unchanged = [...unchanged].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return { groups: sorted, unchanged };
 }
 
 function StatDetailPanel({
@@ -364,6 +604,7 @@ function StatDetailPanel({
   items,
   stats,
   sales,
+  receipts,
   search,
   dateFrom,
   dateTo,
@@ -373,6 +614,7 @@ function StatDetailPanel({
   onPreset,
   onSelect,
   onSelectSale,
+  onSelectReceipt,
   onClose,
 }: {
   statKey: StatKey;
@@ -384,8 +626,11 @@ function StatDetailPanel({
     totalPcs: number;
     salesPcs: number;
     salesCount: number;
+    receiptsPcs: number;
+    receiptsCount: number;
   };
   sales: PublicStockSale[];
+  receipts: PublicStockReceipt[];
   search: string;
   dateFrom: string;
   dateTo: string;
@@ -395,6 +640,7 @@ function StatDetailPanel({
   onPreset: (days: number) => void;
   onSelect: (item: StockItem) => void;
   onSelectSale: (sale: PublicStockSale) => void;
+  onSelectReceipt: (receipt: PublicStockReceipt) => void;
   onClose: () => void;
 }) {
   const panelHeader = (title: string, hint: string) => (
@@ -415,6 +661,26 @@ function StatDetailPanel({
       </button>
     </div>
   );
+  const receiptsByDate = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = receipts;
+    if (q) {
+      list = list.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          r.note.toLowerCase().includes(q) ||
+          r.brand.toLowerCase().includes(q)
+      );
+    }
+    const groups = new Map<string, PublicStockReceipt[]>();
+    for (const r of list) {
+      const bucket = groups.get(r.date) ?? [];
+      bucket.push(r);
+      groups.set(r.date, bucket);
+    }
+    return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [receipts, search]);
+
   const salesByDate = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = sales;
@@ -476,48 +742,12 @@ function StatDetailPanel({
     </div>
   );
 
-  const detailItems = useMemo(() => {
-    if (statKey === "sales") return [];
-    const q = search.trim();
-    let list = items;
-    if (statKey === "in") list = list.filter((i) => i.status === "in");
-    else if (statKey === "out") list = list.filter((i) => i.status === "out");
-    else if (statKey === "pcs") list = [...list].sort((a, b) => b.count - a.count);
-
-    if (q) {
-      list = list
-        .filter((i) => matchesStockSearch(i, q))
-        .sort((a, b) => scoreStockSearch(b, q) - scoreStockSearch(a, q));
-    } else if (statKey !== "pcs") {
-      list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+  const { groups: dayMovementGroups, unchanged } = useMemo(() => {
+    if (statKey === "sales" || statKey === "in") {
+      return { groups: [] as [string, DayMovementRow[]][], unchanged: [] as StockItem[] };
     }
-    return list;
-  }, [items, statKey, search]);
-
-  const { changedGroups, unchanged } = useMemo(() => {
-    if (statKey === "sales") return { changedGroups: [] as [string, StockItem[]][], unchanged: [] as StockItem[] };
-    const groups = new Map<string, StockItem[]>();
-    const noChange: StockItem[] = [];
-
-    for (const item of detailItems) {
-      const hasActivity = !!(item.activity?.lastActivityAt);
-      const dateKey = activityDateKey(item);
-      if (hasActivity && dateKey) {
-        const bucket = groups.get(dateKey) ?? [];
-        bucket.push(item);
-        groups.set(dateKey, bucket);
-      } else {
-        noChange.push(item);
-      }
-    }
-
-    const sorted = [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-    for (const [, bucket] of sorted) {
-      bucket.sort((a, b) => Math.abs(b.activity?.netChange ?? 0) - Math.abs(a.activity?.netChange ?? 0));
-    }
-
-    return { changedGroups: sorted, unchanged: noChange };
-  }, [detailItems, statKey]);
+    return buildDayMovementsByDate(receipts, sales, items, statKey, search);
+  }, [receipts, sales, items, statKey, search]);
 
   const titles: Record<Exclude<StatKey, "sales">, string> = {
     all: `All patterns · ${stats.total}`,
@@ -527,23 +757,23 @@ function StatDetailPanel({
   };
 
   const hints: Record<Exclude<StatKey, "sales">, string> = {
-    all: `${stats.totalPcs.toLocaleString("en-IN")} pieces · grouped by last update`,
-    in: "Stock above minimum · changes highlighted by date",
-    out: "Zero in godown · restock / check history",
-    pcs: "Sorted by quantity · period movement shown",
+    all: `${stats.totalPcs.toLocaleString("en-IN")} pieces · stock in / out per day`,
+    in: `${stats.inStock} patterns in godown now`,
+    out: "Zero in godown · stock out in period",
+    pcs: "Sorted by quantity · stock in / out shown",
   };
 
-  function renderRow(item: StockItem, i: number, highlight?: boolean) {
-    const net = item.activity?.netChange ?? 0;
-    const periodIn = item.activity?.periodIn ?? 0;
-    const periodOut = item.activity?.periodOut ?? 0;
-    const checkDiff = item.activity?.checkDiff ?? 0;
+  function renderMovementRow(row: DayMovementRow, highlight?: boolean) {
+    const flowNet = row.periodIn - row.periodOut;
 
     return (
-      <li key={item._id}>
+      <li key={`${row.date}|${row.stockId}`}>
         <button
           type="button"
-          onClick={() => onSelect(item)}
+          onClick={() => {
+            const item = items.find((i) => i._id === row.stockId);
+            if (item) onSelect(item);
+          }}
           className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors duration-150 active:bg-slate-100 ${
             highlight
               ? "bg-emerald-50/60 ring-1 ring-emerald-100 hover:bg-emerald-50"
@@ -551,43 +781,175 @@ function StatDetailPanel({
           }`}
         >
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
-            {(periodIn > 0 || periodOut > 0 || checkDiff !== 0) && (
-              <p className="mt-0.5 text-[10px] font-medium text-slate-500">
-                {periodIn > 0 && <span className="text-emerald-600">+{periodIn} in</span>}
-                {periodIn > 0 && periodOut > 0 && " · "}
-                {periodOut > 0 && <span className="text-red-500">−{periodOut} out</span>}
-                {(periodIn > 0 || periodOut > 0) && checkDiff !== 0 && " · "}
-                {checkDiff !== 0 && (
-                  <span className={checkDiff > 0 ? "text-emerald-600" : "text-red-500"}>
-                    {checkDiff > 0 ? "+" : ""}
-                    {checkDiff} check
-                  </span>
-                )}
-              </p>
-            )}
-            {item.lastCheckAt && (
-              <p className="mt-0.5 text-[10px] text-slate-400">
-                Last check {formatDayMonthYear(item.lastCheckAt)}
-              </p>
-            )}
+            <p className="truncate text-sm font-semibold text-slate-800">{row.name}</p>
+            <p className="mt-0.5 text-[10px] font-medium text-slate-500">
+              {row.periodIn > 0 && <span className="text-emerald-600">+{row.periodIn} stock in</span>}
+              {row.periodIn > 0 && row.periodOut > 0 && " · "}
+              {row.periodOut > 0 && <span className="text-red-500">−{row.periodOut} stock out</span>}
+            </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <span
               className={`text-sm font-bold tabular-nums ${
-                item.status === "out"
+                row.status === "out"
                   ? "text-red-500"
-                  : item.status === "low"
+                  : row.status === "low"
                     ? "text-amber-600"
                     : "text-emerald-600"
               }`}
             >
-              {item.count} pcs
+              {row.count} pcs
             </span>
-            <DiffBadge net={net} />
+            <DiffBadge net={flowNet} />
           </div>
         </button>
       </li>
+    );
+  }
+
+  function renderStaticRow(item: StockItem) {
+    return (
+      <li key={item._id}>
+        <button
+          type="button"
+          onClick={() => onSelect(item)}
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
+        >
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{item.name}</p>
+          <span
+            className={`text-sm font-bold tabular-nums ${
+              item.status === "out"
+                ? "text-red-500"
+                : item.status === "low"
+                  ? "text-amber-600"
+                  : "text-emerald-600"
+            }`}
+          >
+            {item.count} pcs
+          </span>
+        </button>
+      </li>
+    );
+  }
+
+  if (statKey === "in") {
+    const glassFilterBar = (
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-2xl border border-white/70 bg-white/45 p-3 shadow-[0_4px_20px_rgba(16,185,129,0.08)] ring-1 ring-emerald-100/50 backdrop-blur-md">
+        <div className="flex min-w-[120px] flex-1 flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-800/70">From</label>
+          <input
+            type="date"
+            value={dateFrom}
+            max={dateTo}
+            onChange={(e) => onDateFromChange(e.target.value)}
+            className="rounded-xl border-0 bg-white/70 px-3 py-2 text-sm font-medium text-slate-800 ring-1 ring-white/80 backdrop-blur-sm focus:ring-2 focus:ring-emerald-300/60"
+          />
+        </div>
+        <div className="flex min-w-[120px] flex-1 flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-800/70">To</label>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom}
+            onChange={(e) => onDateToChange(e.target.value)}
+            className="rounded-xl border-0 bg-white/70 px-3 py-2 text-sm font-medium text-slate-800 ring-1 ring-white/80 backdrop-blur-sm focus:ring-2 focus:ring-emerald-300/60"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: "Today", days: 1 },
+            { label: "7 days", days: 7 },
+            { label: "30 days", days: 30 },
+          ].map((p) => (
+            <button
+              key={p.days}
+              type="button"
+              onClick={() => onPreset(p.days)}
+              className="rounded-full border border-white/80 bg-white/55 px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm backdrop-blur-sm transition hover:bg-emerald-600 hover:text-white hover:ring-emerald-600"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="stock-view-stat-fold mx-1 rounded-3xl border border-white/80 bg-gradient-to-br from-emerald-50/70 via-white/50 to-teal-50/60 px-4 pb-5 pt-4 shadow-[0_12px_40px_rgba(16,185,129,0.1)] backdrop-blur-xl sm:mx-0 sm:px-5">
+        <div className="stock-view-stat-fold-inner">
+          {panelHeader(
+            `New stock in · ${stats.receiptsPcs.toLocaleString("en-IN")} PCS (${stats.receiptsCount} entries)`,
+            hints.in
+          )}
+        </div>
+        {glassFilterBar}
+        {activityLoading && (
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-xs font-medium text-emerald-800/80 backdrop-blur-sm">
+            <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-600" />
+            Loading stock in…
+          </div>
+        )}
+        {receiptsByDate.length === 0 ? (
+          <p className="rounded-2xl border border-white/60 bg-white/45 py-12 text-center text-sm text-slate-600 backdrop-blur-sm">
+            No new stock in this period
+          </p>
+        ) : (
+          <div className="max-h-[min(70vh,640px)] space-y-4 overflow-y-auto overscroll-contain pr-1 scroll-smooth">
+            {receiptsByDate.map(([dateKey, group], themeIndex) => {
+              const theme = RECEIPT_DATE_THEMES[themeIndex % RECEIPT_DATE_THEMES.length];
+              const dayPcs = group.reduce((s, r) => s + r.count, 0);
+              return (
+                <section key={dateKey} className={theme.section}>
+                  <div className={`sticky top-0 z-10 mb-2 flex items-center gap-2 ${theme.header}`}>
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${theme.dot}`} />
+                    <h4 className={`text-xs font-bold uppercase tracking-wider ${theme.title}`}>
+                      {formatDayMonthYear(`${dateKey}T12:00:00`)}
+                    </h4>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${theme.badge}`}
+                    >
+                      +{dayPcs} PCS · {group.length} entries
+                    </span>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {group.map((receipt) => (
+                      <li key={receipt._id}>
+                        <button
+                          type="button"
+                          onClick={() => onSelectReceipt(receipt)}
+                          className={`flex w-full items-center gap-3 text-left ${theme.row}`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-slate-900">
+                              {receipt.name}
+                            </p>
+                            {receipt.note ? (
+                              <p className={`mt-1 text-xs font-medium ${theme.note}`}>
+                                <span className={`font-bold ${theme.noteLabel}`}>Note:</span>{" "}
+                                {receipt.note}
+                              </p>
+                            ) : null}
+                            {receipt.createdAt && (
+                              <p className={`mt-0.5 text-[10px] font-medium ${theme.time}`}>
+                                {formatTimeHHMM(receipt.createdAt)}
+                              </p>
+                            )}
+                          </div>
+                          <span
+                            className={`shrink-0 tabular-nums ${theme.qty}`}
+                          >
+                            +{receipt.count} pcs
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -670,11 +1032,11 @@ function StatDetailPanel({
           Updating period changes…
         </div>
       )}
-      {detailItems.length === 0 ? (
+      {dayMovementGroups.length === 0 && unchanged.length === 0 ? (
         <p className="rounded-xl bg-slate-50 py-12 text-center text-sm text-slate-500">No items in this group</p>
       ) : (
         <div className="max-h-[min(70vh,640px)] space-y-5 overflow-y-auto overscroll-contain pr-1 scroll-smooth">
-          {changedGroups.map(([dateKey, group]) => (
+          {dayMovementGroups.map(([dateKey, group]) => (
             <section key={dateKey}>
               <div className="sticky top-0 z-10 mb-2 flex items-center gap-2 bg-white/95 py-1 backdrop-blur-sm">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
@@ -682,10 +1044,10 @@ function StatDetailPanel({
                   {formatDayMonthYear(`${dateKey}T12:00:00`)}
                 </h4>
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                  {group.length} updated
+                  {group.length} with stock in/out
                 </span>
               </div>
-              <ul className="space-y-1">{group.map((item, i) => renderRow(item, i, true))}</ul>
+              <ul className="space-y-1">{group.map((row) => renderMovementRow(row, true))}</ul>
             </section>
           ))}
 
@@ -694,10 +1056,10 @@ function StatDetailPanel({
               <div className="mb-2 flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-slate-300" />
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  No change in period · {unchanged.length}
+                  No stock in or out in period · {unchanged.length}
                 </h4>
               </div>
-              <ul className="space-y-1">{unchanged.map((item, i) => renderRow(item, i))}</ul>
+              <ul className="space-y-1">{unchanged.map(renderStaticRow)}</ul>
             </section>
           )}
         </div>
@@ -838,7 +1200,9 @@ export function PublicStockView() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [syncFlash, setSyncFlash] = useState(false);
+  const [updateInfoOpen, setUpdateInfoOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [status, setStatus] = useState<"" | StockViewStatus>("");
   const [selectedItem, setSelectedItem] = useState<ViewStockItem | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
@@ -945,6 +1309,7 @@ export function PublicStockView() {
   }, [items, search, status]);
 
   const sales = data?.sales ?? [];
+  const receipts = data?.receipts ?? [];
 
   const salesPeriodLabel = useMemo(
     () => formatSalesPeriodLabel(data?.dateRange),
@@ -957,8 +1322,10 @@ export function PublicStockView() {
     const totalPcs = items.reduce((s, i) => s + i.count, 0);
     const salesPcs = data?.salesSummary?.totalPcs ?? 0;
     const salesCount = data?.salesSummary?.count ?? 0;
-    return { total: items.length, inStock, out, totalPcs, salesPcs, salesCount };
-  }, [items, data?.salesSummary]);
+    const receiptsPcs = data?.receiptsSummary?.totalPcs ?? 0;
+    const receiptsCount = data?.receiptsSummary?.count ?? 0;
+    return { total: items.length, inStock, out, totalPcs, salesPcs, salesCount, receiptsPcs, receiptsCount };
+  }, [items, data?.salesSummary, data?.receiptsSummary]);
 
   function clearFilters() {
     setStatus("");
@@ -981,6 +1348,21 @@ export function PublicStockView() {
     if (item) setSelectedItem(item);
   }
 
+  function handleSelectReceipt(receipt: PublicStockReceipt) {
+    const item = items.find((i) => i._id === receipt.stockId);
+    if (item) setSelectedItem(item);
+  }
+
+  function refreshPage() {
+    load({
+      silent: true,
+      panel: !!expandedStat,
+      from: dateFrom,
+      to: dateTo,
+      details: !!expandedStat,
+    });
+  }
+
   function applyDatePreset(days: number) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -988,6 +1370,8 @@ export function PublicStockView() {
     setDateFrom(toLocalDateString(addLocalDays(today, -span)));
     setDateTo(toLocalDateString(today));
   }
+
+  const searchActive = searchFocused || search.trim().length > 0;
 
   if (loading && !data) {
     return (
@@ -1008,23 +1392,32 @@ export function PublicStockView() {
         <header className="stock-view-header relative overflow-hidden">
           <div className="relative mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-3 sm:gap-4">
+              <div className="flex w-full items-center gap-3 sm:gap-4 lg:w-auto">
                 <div
                   className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-amber-400 shadow-md ring-2 ring-amber-500/70 sm:h-14 sm:w-14"
                   title="Tyre stock"
                 >
                   <TyreLogoIcon className="h-8 w-8 sm:h-9 sm:w-9" />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h1 className="truncate text-lg font-extrabold tracking-tight text-black sm:text-2xl">
                     {data?.shopTitle ?? "Tyre Shop"}
                   </h1>
-                  <StockSubtitle text={data?.subtitle ?? "Real-time stock status of all tyre patterns"} />
+                  <StockSubtitle text={data?.subtitle ?? "Real-time stock status"} />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setUpdateInfoOpen(true)}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600 ring-1 ring-amber-200/80 active:scale-95 sm:hidden ${syncFlash ? "stock-view-sync-flash" : ""}`}
+                  aria-label="Last stock update"
+                  title="Last stock update"
+                >
+                  <DoNotDisturbIcon className="h-5 w-5" />
+                </button>
               </div>
 
               <div
-                className={`flex w-full items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 ring-1 ring-amber-200/80 sm:w-auto sm:min-w-[260px] sm:px-4 ${syncFlash ? "stock-view-sync-flash" : ""}`}
+                className={`hidden w-full items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 ring-1 ring-amber-200/80 sm:flex sm:w-auto sm:min-w-[260px] sm:px-4 ${syncFlash ? "stock-view-sync-flash" : ""}`}
               >
                 <DoNotDisturbIcon className="h-5 w-5 shrink-0 text-amber-600" />
                 <div className="min-w-0 flex-1">
@@ -1047,15 +1440,7 @@ export function PublicStockView() {
                 </div>
                 <button
                   type="button"
-                  onClick={() =>
-                    load({
-                      silent: true,
-                      panel: !!expandedStat,
-                      from: dateFrom,
-                      to: dateTo,
-                      details: !!expandedStat,
-                    })
-                  }
+                  onClick={refreshPage}
                   disabled={refreshing}
                   aria-label={refreshing ? "Refreshing page" : "Refresh page"}
                   title={refreshing ? "Refreshing…" : "Refresh page"}
@@ -1086,6 +1471,8 @@ export function PublicStockView() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => window.setTimeout(() => setSearchFocused(false), 120)}
               placeholder="Search tyre pattern, brand, size…"
               className="w-full rounded-2xl border-0 bg-slate-50 py-3.5 pl-12 pr-12 text-sm font-medium text-slate-800 outline-none ring-1 ring-slate-200/80 transition focus:bg-white focus:ring-2 focus:ring-blue-200"
             />
@@ -1099,35 +1486,6 @@ export function PublicStockView() {
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-              </button>
-            )}
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {QUICK_STATUS.map((s) => (
-              <button
-                key={s.id || "all"}
-                type="button"
-                onClick={() => {
-                  setStatus(s.id);
-                  setExpandedStat(s.id === "" ? "all" : s.id === "in" ? "in" : "out");
-                }}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
-                  status === s.id
-                    ? "bg-stone-800 text-white shadow-md"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-            {(search || status) && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="ml-auto text-xs font-bold text-stone-700 hover:underline"
-              >
-                Clear
               </button>
             )}
           </div>
@@ -1148,8 +1506,16 @@ export function PublicStockView() {
           </div>
         )}
 
-        {/* Stats — clickable + fold details */}
-        <section className="mb-8 overflow-hidden rounded-3xl bg-white shadow-[0_2px_16px_rgba(15,23,42,0.06)] ring-1 ring-slate-100">
+        {/* Stats — hidden while search is active */}
+        <div
+          className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-out motion-reduce:transition-none ${
+            searchActive
+              ? "mb-2 grid-rows-[0fr] opacity-0"
+              : "mb-8 grid-rows-[1fr] opacity-100"
+          }`}
+        >
+          <div className="overflow-hidden min-h-0">
+        <section className="overflow-hidden rounded-3xl bg-white shadow-[0_2px_16px_rgba(15,23,42,0.06)] ring-1 ring-slate-100 sm:shadow-[0_2px_16px_rgba(15,23,42,0.06)]">
           <div
             className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${
               expandedStat ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"
@@ -1261,6 +1627,7 @@ export function PublicStockView() {
                   items={items}
                   stats={stats}
                   sales={sales}
+                  receipts={receipts}
                   search={search}
                   dateFrom={dateFrom}
                   dateTo={dateTo}
@@ -1270,16 +1637,19 @@ export function PublicStockView() {
                   onPreset={applyDatePreset}
                   onSelect={setSelectedItem}
                   onSelectSale={handleSelectSale}
+                  onSelectReceipt={handleSelectReceipt}
                   onClose={clearFilters}
                 />
               )}
             </div>
           </div>
         </section>
+          </div>
+        </div>
 
         <div
           className={`stock-view-patterns-panel grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${
-            expandedStat
+            expandedStat && !searchActive
               ? "pointer-events-none grid-rows-[0fr] opacity-0"
               : "grid-rows-[1fr] opacity-100"
           }`}
@@ -1342,6 +1712,14 @@ export function PublicStockView() {
           </div>
         </div>
       </main>
+
+      <LastStockUpdateSheet
+        open={updateInfoOpen}
+        lastUserUpdateAt={data?.lastUserUpdateAt}
+        refreshing={refreshing}
+        onClose={() => setUpdateInfoOpen(false)}
+        onRefresh={refreshPage}
+      />
 
       <PatternDetailSheet
         item={selectedItem}

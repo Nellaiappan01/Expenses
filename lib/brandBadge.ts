@@ -11,7 +11,7 @@ const KNOWN_BRANDS: Record<string, BrandBadgeStyle> = {
   jk: { bg: "bg-[#1B8F4E]", text: "text-white", ring: "ring-[#15703d]" },
   jktyre: { bg: "bg-[#1B8F4E]", text: "text-white", ring: "ring-[#15703d]" },
   bridgestone: { bg: "bg-[#E60012]", text: "text-white", ring: "ring-[#b8000e]" },
-  michelin: { bg: "bg-[#0033A0]", text: "text-white", ring: "ring-[#002678]" },
+  michelin: { bg: "bg-[#FFBE00]", text: "text-[#1a1a1a]", ring: "ring-[#cc9800]" },
   goodyear: { bg: "bg-[#FFDD00]", text: "text-[#1a1a1a]", ring: "ring-[#d4b800]" },
   yokohama: { bg: "bg-[#E4002B]", text: "text-white", ring: "ring-[#b80022]" },
   continental: { bg: "bg-[#FFA500]", text: "text-[#1a1a1a]", ring: "ring-[#cc8400]" },
@@ -61,8 +61,9 @@ export function getBrandBadgeStyle(brand: string): BrandBadgeStyle {
   if (KNOWN_BRANDS[key]) {
     return KNOWN_BRANDS[key];
   }
-  for (const [known, style] of Object.entries(KNOWN_BRANDS)) {
-    if (key.includes(known) || known.includes(key)) {
+  const knownEntries = Object.entries(KNOWN_BRANDS).sort((a, b) => b[0].length - a[0].length);
+  for (const [known, style] of knownEntries) {
+    if (known.length >= 3 && key.includes(known)) {
       return style;
     }
   }

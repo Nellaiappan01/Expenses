@@ -22,6 +22,17 @@ export type PublicStockSale = {
   createdAt: string | null;
 };
 
+export type PublicStockReceipt = {
+  _id: string;
+  stockId: string;
+  name: string;
+  brand: string;
+  count: number;
+  note: string;
+  date: string;
+  createdAt: string | null;
+};
+
 export function getStockViewStatus(count: number, minStock: number): StockViewStatus {
   if (count <= 0) return "out";
   if (minStock > 0 && count <= minStock) return "low";

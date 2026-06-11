@@ -4,13 +4,14 @@ import {
   defaultPublicStockDateRange,
   getStockViewStatus,
   type PublicStockActivity,
+  type PublicStockReceipt,
   type PublicStockSale,
   type StockViewStatus,
 } from "./publicStockTypes";
 import { itemsLastUserUpdate } from "./stockLastUpdate";
 import { serializeStockItem } from "./stockSerialize";
 
-export type { PublicStockActivity, PublicStockSale, StockViewStatus };
+export type { PublicStockActivity, PublicStockReceipt, PublicStockSale, StockViewStatus };
 export { getStockViewStatus };
 
 const STOCK_FLOW_NOTES = new Set([
@@ -124,6 +125,56 @@ async function buildActivityMap(
   return map;
 }
 
+async function fetchStockInRecords(
+  businessId: string,
+  fromStr: string,
+  toStr: string,
+  itemMap: Map<string, { name?: string; brand?: string }>
+): Promise<PublicStockReceipt[]> {
+  const db = await getDb();
+  const records = await db
+    .collection("stock_in")
+    .find({ businessId, date: { $gte: fromStr, $lte: toStr } })
+    .sort({ date: -1, createdAt: -1 })
+    .toArray();
+
+  return records.map((r) => {
+    const item = itemMap.get(r.stockId as string);
+    return {
+      _id: r._id?.toString() ?? "",
+      stockId: r.stockId as string,
+      name: item?.name ?? (r.stockId as string),
+      brand: (item?.brand as string) ?? "",
+      count: r.count ?? 0,
+      note: ((r.note as string) || "").trim(),
+      date: (r.date as string) || fromStr,
+      createdAt: r.createdAt?.toISOString?.() ?? null,
+    };
+  });
+}
+
+async function fetchReceiptsSummary(
+  businessId: string,
+  fromStr: string,
+  toStr: string
+): Promise<{ totalPcs: number; count: number }> {
+  const db = await getDb();
+  const rows = await db
+    .collection("stock_in")
+    .aggregate<{ totalPcs: number; count: number }>([
+      { $match: { businessId, date: { $gte: fromStr, $lte: toStr } } },
+      {
+        $group: {
+          _id: null,
+          totalPcs: { $sum: "$count" },
+          count: { $sum: 1 },
+        },
+      },
+    ])
+    .toArray();
+  return { totalPcs: rows[0]?.totalPcs ?? 0, count: rows[0]?.count ?? 0 };
+}
+
 async function fetchSalesRecords(
   businessId: string,
   fromStr: string,
@@ -231,22 +282,36 @@ export async function fetchPublicStockPayload(options?: FetchPublicStockOptions)
 
   let activityMap = new Map<string, PublicStockActivity>();
   let sales: PublicStockSale[] = [];
+  let receipts: PublicStockReceipt[] = [];
   let salesSummary: { totalPcs: number; count: number };
+  let receiptsSummary: { totalPcs: number; count: number };
 
   if (includeDetails) {
-    const [activity, salesRows, summary] = await Promise.all([
+    const [activity, salesRows, salesSum, receiptRows, receiptSum] = await Promise.all([
       buildActivityMap(businessId, fromStr, toStr),
       fetchSalesRecords(businessId, fromStr, toStr, itemMap),
       fetchSalesSummary(businessId, fromStr, toStr),
+      fetchStockInRecords(businessId, fromStr, toStr, itemMap),
+      fetchReceiptsSummary(businessId, fromStr, toStr),
     ]);
     activityMap = activity;
     sales = salesRows;
+    receipts = receiptRows;
     salesSummary = {
-      totalPcs: summary.totalPcs,
-      count: summary.count,
+      totalPcs: salesSum.totalPcs,
+      count: salesSum.count,
+    };
+    receiptsSummary = {
+      totalPcs: receiptSum.totalPcs,
+      count: receiptSum.count,
     };
   } else {
-    salesSummary = await fetchSalesSummary(businessId, fromStr, toStr);
+    const [salesSum, receiptSum] = await Promise.all([
+      fetchSalesSummary(businessId, fromStr, toStr),
+      fetchReceiptsSummary(businessId, fromStr, toStr),
+    ]);
+    salesSummary = salesSum;
+    receiptsSummary = receiptSum;
   }
 
   const shopTitle =
@@ -273,12 +338,13 @@ export async function fetchPublicStockPayload(options?: FetchPublicStockOptions)
   return {
     businessId,
     shopTitle,
-    subtitle: process.env.PUBLIC_STOCK_SUBTITLE?.trim() || "Real-time stock status of all tyre patterns",
+    subtitle: process.env.PUBLIC_STOCK_SUBTITLE?.trim() || "Real-time stock status",
     updatedAt: new Date().toISOString(),
     lastUserUpdateAt,
     dateRange: { from: fromStr, to: toStr },
-    ...(includeDetails ? { sales } : {}),
+    ...(includeDetails ? { sales, receipts } : {}),
     salesSummary,
+    receiptsSummary,
     items: serialized,
   };
 }

@@ -52,20 +52,20 @@ type Props = {
 export function PatternTable({ items, onSelect }: Props) {
   return (
     <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_16px_rgba(15,23,42,0.06)] ring-1 ring-slate-100">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] border-collapse text-left text-sm">
+      <div className="sm:overflow-x-auto">
+        <table className="w-full table-fixed border-collapse text-left text-sm sm:min-w-[520px] sm:table-auto">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/80">
-              <th className="px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:px-4">
+              <th className="hidden px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:table-cell sm:px-4">
                 Photo
-              </th>
-              <th className="px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:px-4">
-                Pattern
               </th>
               <th className="hidden px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:table-cell sm:px-4">
                 Brand
               </th>
-              <th className="px-3 py-3 text-right text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:px-4">
+              <th className="px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:px-4">
+                Pattern
+              </th>
+              <th className="w-[4.5rem] px-2 py-3 text-right text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:w-auto sm:px-4">
                 Qty
               </th>
               <th className="hidden px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 md:table-cell md:px-4">
@@ -91,21 +91,23 @@ export function PatternTable({ items, onSelect }: Props) {
                   tabIndex={0}
                   role="button"
                 >
-                  <td className="px-3 py-2.5 sm:px-4">
+                  <td className="hidden px-3 py-2.5 sm:table-cell sm:px-4">
                     <Thumb item={item} />
-                  </td>
-                  <td className="px-3 py-2.5 sm:px-4">
-                    <p className="font-bold text-slate-900 group-hover:text-blue-700">{item.name}</p>
-                    {item.size && (
-                      <p className="mt-0.5 text-xs text-slate-500 sm:hidden">{item.size}</p>
-                    )}
                   </td>
                   <td className="hidden px-3 py-2.5 sm:table-cell sm:px-4">
                     {item.brand ? <BrandBadge brand={item.brand} size="xs" /> : "—"}
                   </td>
-                  <td className="px-3 py-2.5 text-right sm:px-4">
+                  <td className="min-w-0 px-3 py-2.5 sm:px-4">
+                    <p
+                      className="truncate font-bold text-slate-900 group-hover:text-blue-700"
+                      title={item.name}
+                    >
+                      {item.name}
+                    </p>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2.5 text-right sm:px-4">
                     <span
-                      className={`inline-block rounded-lg px-2.5 py-1 text-sm font-extrabold tabular-nums ${
+                      className={`inline-block rounded-lg px-2 py-1 text-sm font-extrabold tabular-nums sm:px-2.5 ${
                         item.status === "out"
                           ? "text-red-600"
                           : item.status === "low"
@@ -114,7 +116,7 @@ export function PatternTable({ items, onSelect }: Props) {
                       }`}
                     >
                       {item.count}
-                      <span className="ml-1 text-[10px] font-bold text-slate-400">PCS</span>
+                      <span className="ml-0.5 text-[10px] font-bold text-slate-400 sm:ml-1">PCS</span>
                     </span>
                   </td>
                   <td className="hidden px-3 py-2.5 md:table-cell md:px-4">
