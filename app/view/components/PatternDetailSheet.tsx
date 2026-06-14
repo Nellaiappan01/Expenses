@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { getPatternImageUrl } from "@/lib/patternImageUrl";
 import { shareStockOnWhatsApp } from "@/lib/shareStockWhatsApp";
 import type { StockViewStatus } from "@/lib/publicStock";
+import { usePublicStockUser } from "./PublicStockUserContext";
 
 export type ViewStockItem = {
   _id: string;
@@ -35,6 +36,7 @@ export function PatternDetailSheet({ item, shopName, onClose }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+  const publicUser = usePublicStockUser();
 
   useEffect(() => setMounted(true), []);
 
@@ -54,7 +56,7 @@ export function PatternDetailSheet({ item, shopName, onClose }: Props) {
 
   if (!mounted || !item) return null;
 
-  const imageUrl = getPatternImageUrl(item);
+  const imageUrl = getPatternImageUrl(item, publicUser);
   const hasImage = !!imageUrl && !imgFailed;
 
   async function handleDownload() {

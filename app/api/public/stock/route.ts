@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchPublicStockPayload } from "@/lib/publicStock";
+import { fetchPublicStockPayload, PublicStockUserNotFoundError } from "@/lib/publicStock";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
       from: searchParams.get("from"),
       to: searchParams.get("to"),
       details: searchParams.get("details") === "1",
+      user: searchParams.get("user"),
     });
     return NextResponse.json(payload, {
       headers: {
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof PublicStockUserNotFoundError) {
+      return NextResponse.json({ error: "Shop not found" }, { status: 404 });
+    }
     console.error("Public stock GET error:", error);
     return NextResponse.json({ error: "Failed to load stock" }, { status: 500 });
   }

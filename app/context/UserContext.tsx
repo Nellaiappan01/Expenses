@@ -14,8 +14,15 @@ const USER_KEY = "ledger_user_id";
 type UserContextType = {
   userId: string | null;
   userName: string | null;
+  username: string | null;
   isAdmin: boolean;
-  setUser: (data: { token?: string; userId: string; userName: string; isAdmin?: boolean }) => void;
+  setUser: (data: {
+    token?: string;
+    userId: string;
+    userName: string;
+    username?: string;
+    isAdmin?: boolean;
+  }) => void;
   clearUser: () => void;
   fetchHeaders: () => Record<string, string>;
 };
@@ -25,6 +32,7 @@ const UserContext = createContext<UserContextType | null>(null);
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -35,6 +43,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const data = JSON.parse(stored);
         setUserId(data.userId);
         setUserName(data.userName || data.userId);
+        setUsername(data.username || data.userId);
         setIsAdmin(!!data.isAdmin);
       } catch {
         localStorage.removeItem(USER_KEY);
@@ -43,9 +52,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  const setUser = useCallback((data: { token?: string; userId: string; userName: string; isAdmin?: boolean }) => {
+  const setUser = useCallback((data: {
+    token?: string;
+    userId: string;
+    userName: string;
+    username?: string;
+    isAdmin?: boolean;
+  }) => {
     setUserId(data.userId);
     setUserName(data.userName || data.userId);
+    setUsername((data.username || data.userId).toLowerCase());
     setIsAdmin(!!data.isAdmin);
     localStorage.setItem(
       USER_KEY,
@@ -53,6 +69,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         token: data.token,
         userId: data.userId,
         userName: data.userName || data.userId,
+        username: (data.username || data.userId).toLowerCase(),
         isAdmin: !!data.isAdmin,
       })
     );
@@ -61,6 +78,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const clearUser = useCallback(() => {
     setUserId(null);
     setUserName(null);
+    setUsername(null);
     setIsAdmin(false);
     localStorage.removeItem(USER_KEY);
   }, []);
@@ -80,6 +98,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const value: UserContextType = {
     userId,
     userName,
+    username,
     isAdmin,
     setUser,
     clearUser,

@@ -15,6 +15,7 @@ import { StockThumbnail } from "./StockThumbnail";
 import { StockPhotoUploader } from "./StockPhotoUploader";
 import { GodownDailyHub } from "./components/GodownDailyHub";
 import { EveningCheckPanel } from "./components/EveningCheckPanel";
+import { PublicViewLink } from "./components/PublicViewLink";
 import { stockHeroUrl } from "@/lib/cloudinaryUrls";
 import { uploadStockPhoto } from "@/lib/uploadStockPhoto";
 
@@ -388,7 +389,8 @@ export default function StockPage() {
               Godown Stock
             </h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <PublicViewLink variant="compact" />
             <button
               type="button"
               onClick={() => setPageMode(pageMode === "daily" ? "inventory" : "daily")}
@@ -404,6 +406,8 @@ export default function StockPage() {
             </Link>
           </div>
         </header>
+
+        <PublicViewLink />
 
         {pageMode === "inventory" && (
           <div className="mb-4 flex flex-wrap gap-2">

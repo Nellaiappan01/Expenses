@@ -9,7 +9,7 @@ import type { StockRequest } from "@/lib/stockRequestTypes";
 import { isValidMobile, sanitizeMobileInput } from "@/lib/phone";
 import { matchesStockSearch } from "@/lib/stockSearch";
 import type { StockFlowItem } from "../components/StockMovementFlow";
-import { OrderClaimFlow } from "../components/OrderClaimFlow";
+import { OrderClaimFlow, type ClaimUpdatePayload } from "../components/OrderClaimFlow";
 
 export default function StockOrdersPage() {
   const router = useRouter();
@@ -88,6 +88,34 @@ export default function StockOrdersPage() {
     return false;
   }
 
+  async function handleUpdate(id: string, payload: ClaimUpdatePayload) {
+    setError("");
+    const res = await apiFetch(`/api/stock/requests/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      await fetchRequests();
+      return true;
+    }
+    setError(data.error || "Update failed");
+    return false;
+  }
+
+  async function handleDelete(id: string) {
+    setError("");
+    const res = await apiFetch(`/api/stock/requests/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      await fetchRequests();
+      return true;
+    }
+    const data = await res.json();
+    setError(data.error || "Delete failed");
+    return false;
+  }
+
   async function submitAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!addStockId || !addName.trim() || !isValidMobile(addPhone)) return;
@@ -137,8 +165,11 @@ export default function StockOrdersPage() {
         loading={loading}
         shopName={userName ?? undefined}
         error={error}
+        items={items}
         onApprove={handleApprove}
         onReject={handleReject}
+        onUpdate={handleUpdate}
+        onDelete={handleDelete}
         onRefresh={fetchRequests}
         onAddRequest={() => setAddOpen(true)}
       />

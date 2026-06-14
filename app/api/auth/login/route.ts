@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/mongodb";
 import { createSession } from "@/lib/auth";
+import { publicSlugFromUserRecord } from "@/lib/publicStock";
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,6 +48,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       token,
       userId: user.userId,
+      username: publicSlugFromUserRecord({
+        username: user.username as string | undefined,
+        userId: user.userId as string | undefined,
+        email: user.email as string | undefined,
+      }),
       name: user.name || user.userId,
       isAdmin,
     });

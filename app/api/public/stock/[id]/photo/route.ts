@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongodb";
-import { resolvePublicBusinessId } from "@/lib/publicStock";
+import { PublicStockUserNotFoundError, resolvePublicBusinessId } from "@/lib/publicStock";
 import { readStockPhoto } from "@/lib/stockPhoto";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -14,7 +14,8 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const businessId = await resolvePublicBusinessId();
+    const userSlug = request.nextUrl.searchParams.get("user");
+    const businessId = await resolvePublicBusinessId(userSlug);
     const db = await getDb();
     const item = await db.collection("stock").findOne({
       _id: new ObjectId(id),
@@ -40,6 +41,9 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (error instanceof PublicStockUserNotFoundError) {
+      return NextResponse.json({ error: "Shop not found" }, { status: 404 });
+    }
     console.error("Public stock photo GET error:", error);
     return NextResponse.json({ error: "Failed to load photo" }, { status: 500 });
   }

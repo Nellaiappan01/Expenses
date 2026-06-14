@@ -203,7 +203,86 @@ async function fetchSalesRecords(
   });
 }
 
-export async function resolvePublicBusinessId(): Promise<string> {
+export class PublicStockUserNotFoundError extends Error {
+  slug: string;
+
+  constructor(slug: string) {
+    super(`User not found: ${slug}`);
+    this.name = "PublicStockUserNotFoundError";
+    this.slug = slug;
+  }
+}
+
+export type PublicStockUserRef = {
+  userId: string;
+  username: string;
+  name: string;
+};
+
+export function normalizePublicSlugInput(slug: string): string {
+  try {
+    return decodeURIComponent(slug).trim().toLowerCase();
+  } catch {
+    return slug.trim().toLowerCase();
+  }
+}
+
+/** Best URL slug for a godown account (used in /{slug}/view links). */
+export function publicSlugFromUserRecord(user: {
+  username?: string | null;
+  userId?: string | null;
+  email?: string | null;
+}): string {
+  const username = (user.username || "").trim().toLowerCase();
+  const userId = (user.userId || "").trim().toLowerCase();
+  const email = (user.email || "").trim().toLowerCase();
+  if (username) return username;
+  if (userId) return userId;
+  if (email) return email;
+  return "default";
+}
+
+export async function resolveUserByPublicSlug(
+  slug: string
+): Promise<PublicStockUserRef | null> {
+  const normalized = normalizePublicSlugInput(slug);
+  if (!normalized) return null;
+
+  const altUserId = normalized.replace(/@/g, "_").replace(/\s+/g, "_");
+
+  const db = await getDb();
+  const user = await db.collection("users").findOne({
+    $or: [
+      { username: normalized },
+      { userId: normalized },
+      { email: normalized },
+      { username: altUserId },
+      { userId: altUserId },
+      { userId: normalized.replace(/\s+/g, "_") },
+    ],
+  });
+  if (!user?.userId) return null;
+
+  const userId = user.userId as string;
+  const publicSlug = publicSlugFromUserRecord({
+    username: user.username as string | undefined,
+    userId: user.userId as string | undefined,
+    email: user.email as string | undefined,
+  });
+  return {
+    userId,
+    username: publicSlug,
+    name: (user.name as string) || userId,
+  };
+}
+
+export async function resolvePublicBusinessId(slug?: string | null): Promise<string> {
+  if (slug?.trim()) {
+    const user = await resolveUserByPublicSlug(slug);
+    if (!user) throw new PublicStockUserNotFoundError(slug.trim());
+    return user.userId;
+  }
+
   const env = process.env.PUBLIC_STOCK_BUSINESS_ID?.trim();
   if (env) return env;
 
@@ -225,11 +304,21 @@ export async function resolvePublicBusinessId(): Promise<string> {
   return (any?.userId as string) || "default";
 }
 
+export async function resolveDefaultPublicUserSlug(): Promise<string | null> {
+  const businessId = await resolvePublicBusinessId();
+  if (!businessId || businessId === "default") return null;
+
+  const ref = await resolveUserByPublicSlug(businessId);
+  return ref?.username ?? businessId.toLowerCase();
+}
+
 export type FetchPublicStockOptions = {
   from?: string | null;
   to?: string | null;
   /** Full activity + sales list (heavier). Default false for fast catalogue load. */
   details?: boolean;
+  /** Login username or userId for per-user public view */
+  user?: string | null;
 };
 
 async function fetchSalesSummary(
@@ -255,7 +344,8 @@ async function fetchSalesSummary(
 }
 
 export async function fetchPublicStockPayload(options?: FetchPublicStockOptions) {
-  const businessId = await resolvePublicBusinessId();
+  const slug = options?.user?.trim() || null;
+  const businessId = await resolvePublicBusinessId(slug);
   const db = await getDb();
 
   const defaults = defaultPublicStockDateRange();
@@ -314,10 +404,12 @@ export async function fetchPublicStockPayload(options?: FetchPublicStockOptions)
     receiptsSummary = receiptSum;
   }
 
-  const shopTitle =
-    process.env.PUBLIC_STOCK_TITLE?.trim() ||
-    (user?.name as string) ||
-    "Tyre Shop";
+  const publicUserRef = slug ? await resolveUserByPublicSlug(slug) : null;
+  const shopTitle = slug
+    ? publicUserRef?.name || (user?.name as string) || "Tyre Shop"
+    : process.env.PUBLIC_STOCK_TITLE?.trim() ||
+      (user?.name as string) ||
+      "Tyre Shop";
 
   const serialized = items.map((i) => {
     const base = serializeStockItem({ ...i, _id: i._id?.toString() });
@@ -337,6 +429,7 @@ export async function fetchPublicStockPayload(options?: FetchPublicStockOptions)
 
   return {
     businessId,
+    publicUser: publicUserRef?.username ?? null,
     shopTitle,
     subtitle: process.env.PUBLIC_STOCK_SUBTITLE?.trim() || "Real-time stock status",
     updatedAt: new Date().toISOString(),

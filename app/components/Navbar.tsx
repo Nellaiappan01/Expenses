@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConfig } from "@/app/context/ConfigContext";
+import { useUser } from "@/app/context/UserContext";
 import { isPublicRoute } from "@/lib/publicRoutes";
+import { publicStockViewPath, publicViewSlug } from "@/lib/publicStockPaths";
 
-/** Bottom bar on godown / stock in / out / dashboard — Claim is in header menu only. */
+/** Bottom bar on godown / stock in / out / dashboard / public view */
 const stockNavItems = [
   { href: "/stock", label: "Godown", icon: StockIcon },
   { href: "/stock/in", label: "In", icon: StockInIcon },
@@ -84,18 +86,29 @@ function DashboardIcon({ active }: { active: boolean }) {
   );
 }
 
-function stockPathActive(pathname: string, href: string): boolean {
+function ViewIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  );
+}
+
+function stockPathActive(pathname: string, href: string, viewPath?: string | null): boolean {
   if (pathname === href) return true;
   if (href === "/stock") return pathname === "/stock" || pathname === "/stock/";
   if (href === "/stock/in") return pathname.startsWith("/stock/in");
   if (href === "/stock/out") return pathname.startsWith("/stock/out");
   if (href === "/stock/dashboard") return pathname.startsWith("/stock/dashboard");
+  if (viewPath && href === viewPath) return pathname === viewPath || pathname === `${viewPath}/`;
   return false;
 }
 
 export default function Navbar() {
   const pathname = usePathname();
   const { config } = useConfig() ?? {};
+  const { userId, username } = useUser();
 
   if (pathname === "/select-user") return null;
 
@@ -104,11 +117,18 @@ export default function Navbar() {
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   const hasStock = !!features.stock;
   const onStockArea = pathname.startsWith("/stock");
+  const viewSlug = publicViewSlug(username, userId);
+  const viewPath = viewSlug ? publicStockViewPath(viewSlug) : null;
+  const onPublicView = viewPath ? pathname === viewPath || pathname === `${viewPath}/` : false;
 
-  const useStockBar = hasStock && onStockArea;
+  const useStockBar = hasStock && (onStockArea || onPublicView);
 
   const navItems = useStockBar
-    ? stockNavItems
+    ? [
+        ...stockNavItems.slice(0, 3),
+        ...(viewPath ? [{ href: viewPath, label: "View", icon: ViewIcon }] : []),
+        stockNavItems[3],
+      ]
     : ledgerNavItems.filter((item) => {
         const hasLedger = features.expenses || features.workers;
         if ("ledger" in item && item.ledger) return hasLedger;
@@ -116,7 +136,7 @@ export default function Navbar() {
       });
 
   const isActive = (href: string) =>
-    useStockBar ? stockPathActive(pathname, href) : pathname === href || (href !== "/" && pathname.startsWith(href));
+    useStockBar ? stockPathActive(pathname, href, viewPath) : pathname === href || (href !== "/" && pathname.startsWith(href));
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)]">

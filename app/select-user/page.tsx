@@ -8,6 +8,7 @@ type AuthJson = {
   error?: string;
   token?: string;
   userId?: string;
+  username?: string;
   name?: string;
   isAdmin?: boolean;
 };
@@ -56,6 +57,7 @@ export default function LoginPage() {
         token: data.token,
         userId: data.userId,
         userName: data.name ?? data.userId,
+        username: data.username ?? username.trim().toLowerCase(),
         isAdmin: data.isAdmin,
       });
       router.push("/");
@@ -88,6 +90,7 @@ export default function LoginPage() {
         token: data.token,
         userId: data.userId,
         userName: data.name ?? data.userId,
+        username: data.username ?? username.trim().toLowerCase(),
         isAdmin: data.isAdmin,
       });
       router.push("/");

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { getPatternImageUrl } from "@/lib/patternImageUrl";
 import { BrandBadge } from "./BrandBadge";
+import { usePublicStockUser } from "./PublicStockUserContext";
 import type { StockViewStatus } from "@/lib/publicStock";
 import type { ViewStockItem } from "./PatternDetailSheet";
 
@@ -20,7 +21,8 @@ const ROW_HIGHLIGHT: Record<StockViewStatus, string> = {
 
 function Thumb({ item }: { item: ViewStockItem }) {
   const [failed, setFailed] = useState(false);
-  const src = getPatternImageUrl(item);
+  const publicUser = usePublicStockUser();
+  const src = getPatternImageUrl(item, publicUser);
 
   if (!src || failed) {
     return (

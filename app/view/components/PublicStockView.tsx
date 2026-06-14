@@ -13,6 +13,8 @@ import {
 } from "@/lib/publicStockTypes";
 import { getPatternImageUrl } from "@/lib/patternImageUrl";
 import { BrandBadge } from "./BrandBadge";
+import { PublicStockUserProvider, usePublicStockUser } from "./PublicStockUserContext";
+import { SalesPatternPicker, type SalesPatternOption } from "./SalesPatternPicker";
 import { PatternDetailSheet } from "./PatternDetailSheet";
 import { TyreLogoIcon } from "./ShopLogo";
 import type { ViewStockItem } from "./PatternDetailSheet";
@@ -197,7 +199,8 @@ function StatusIcon({ kind }: { kind: "check" | "warn" | "x" }) {
 
 function PatternImage({ item, dimmed }: { item: StockItem; dimmed?: boolean }) {
   const [failed, setFailed] = useState(false);
-  const src = getPatternImageUrl(item);
+  const publicUser = usePublicStockUser();
+  const src = getPatternImageUrl(item, publicUser);
 
   if (!src || failed) {
     return (
@@ -643,6 +646,12 @@ function StatDetailPanel({
   onSelectReceipt: (receipt: PublicStockReceipt) => void;
   onClose: () => void;
 }) {
+  const [salesPatternFilter, setSalesPatternFilter] = useState("");
+
+  useEffect(() => {
+    if (statKey !== "sales") setSalesPatternFilter("");
+  }, [statKey]);
+
   const panelHeader = (title: string, hint: string) => (
     <div className="stock-view-stat-fold-inner mb-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
@@ -681,9 +690,34 @@ function StatDetailPanel({
     return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [receipts, search]);
 
-  const salesByDate = useMemo(() => {
+  const salesPatternOptions = useMemo((): SalesPatternOption[] => {
+    const map = new Map<string, SalesPatternOption>();
+    for (const s of sales) {
+      const existing = map.get(s.stockId);
+      if (existing) {
+        existing.pcs += s.count;
+        existing.count += 1;
+      } else {
+        map.set(s.stockId, {
+          id: s.stockId,
+          name: s.name,
+          brand: s.brand,
+          pcs: s.count,
+          count: 1,
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+  }, [sales]);
+
+  const filteredSales = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = sales;
+    if (salesPatternFilter) {
+      list = list.filter((s) => s.stockId === salesPatternFilter);
+    }
     if (q) {
       list = list.filter(
         (s) =>
@@ -692,14 +726,29 @@ function StatDetailPanel({
           s.brand.toLowerCase().includes(q)
       );
     }
+    return list;
+  }, [sales, salesPatternFilter, search]);
+
+  const filteredSalesSummary = useMemo(
+    () => ({
+      pcs: filteredSales.reduce((sum, s) => sum + s.count, 0),
+      count: filteredSales.length,
+    }),
+    [filteredSales]
+  );
+
+  const salesByDate = useMemo(() => {
     const groups = new Map<string, PublicStockSale[]>();
-    for (const s of list) {
+    for (const s of filteredSales) {
       const bucket = groups.get(s.date) ?? [];
       bucket.push(s);
       groups.set(s.date, bucket);
     }
     return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [sales, search]);
+  }, [filteredSales]);
+
+  const selectedSalesPatternName =
+    salesPatternOptions.find((p) => p.id === salesPatternFilter)?.name ?? "";
 
   const dateFilterBar = (
     <div className="mb-4 flex flex-wrap items-end gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
@@ -738,6 +787,40 @@ function StatDetailPanel({
             {p.label}
           </button>
         ))}
+      </div>
+    </div>
+  );
+
+  const salesFilterBar = (
+    <div className="mb-4 space-y-3">
+      {dateFilterBar}
+      <div className="rounded-2xl bg-violet-50/60 p-3 ring-1 ring-violet-100">
+        <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-violet-700/80">
+          Pattern
+        </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+          <SalesPatternPicker
+            options={salesPatternOptions}
+            value={salesPatternFilter}
+            onChange={setSalesPatternFilter}
+          />
+          {salesPatternFilter ? (
+            <div className="flex shrink-0 flex-row items-center justify-between gap-3 rounded-2xl bg-white px-3.5 py-2.5 ring-1 ring-violet-200 sm:min-w-[148px] sm:flex-col sm:items-start sm:justify-center">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-violet-700/80">
+                Selected total
+              </p>
+              <div className="text-right sm:text-left">
+                <p className="text-sm font-extrabold tabular-nums text-violet-900">
+                  {filteredSalesSummary.pcs.toLocaleString("en-IN")} PCS
+                </p>
+                <p className="text-[10px] font-medium text-violet-700/90">
+                  {filteredSalesSummary.count}{" "}
+                  {filteredSalesSummary.count === 1 ? "sale" : "sales"} in period
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -954,13 +1037,14 @@ function StatDetailPanel({
   }
 
   if (statKey === "sales") {
+    const salesTitle = salesPatternFilter
+      ? `Sales · ${filteredSalesSummary.pcs.toLocaleString("en-IN")} PCS (${filteredSalesSummary.count} entries) · ${selectedSalesPatternName}`
+      : `Sales · ${stats.salesPcs.toLocaleString("en-IN")} PCS (${stats.salesCount} entries)`;
+
     return (
       <div className="stock-view-stat-fold px-4 pb-5 pt-4 sm:px-5">
-        {panelHeader(
-          `Sales · ${stats.salesPcs.toLocaleString("en-IN")} PCS (${stats.salesCount} entries)`,
-          "Stock out / sold — pattern, quantity & note"
-        )}
-        {dateFilterBar}
+        {panelHeader(salesTitle, "Stock out / sold — filter by pattern & date")}
+        {salesFilterBar}
         {activityLoading && (
           <div className="mb-3 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">
             <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-stone-600" />
@@ -969,7 +1053,9 @@ function StatDetailPanel({
         )}
         {salesByDate.length === 0 ? (
           <p className="rounded-xl bg-slate-50 py-12 text-center text-sm text-slate-500">
-            No stock out in this period
+            {salesPatternFilter
+              ? "No sales for this pattern in this period"
+              : "No stock out in this period"}
           </p>
         ) : (
           <div className="max-h-[min(70vh,640px)] space-y-5 overflow-y-auto overscroll-contain pr-1 scroll-smooth">
@@ -1194,7 +1280,7 @@ function PatternCard({
   );
 }
 
-export function PublicStockView() {
+export function PublicStockView({ publicUser }: { publicUser?: string } = {}) {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1250,6 +1336,7 @@ export function PublicStockView() {
         params.set("from", opts?.from ?? range.from);
         params.set("to", opts?.to ?? range.to);
         if (opts?.details) params.set("details", "1");
+        if (publicUser) params.set("user", publicUser);
         const res = await fetch(`/api/public/stock?${params}`, { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load");
@@ -1266,7 +1353,7 @@ export function PublicStockView() {
         setActivityLoading(false);
       }
     },
-    []
+    [publicUser]
   );
 
   useEffect(() => {
@@ -1387,6 +1474,7 @@ export function PublicStockView() {
   }
 
   return (
+    <PublicStockUserProvider publicUser={publicUser}>
     <div className="stock-view-page min-h-screen pb-12">
       <div className="stock-view-sticky-bar">
         <header className="stock-view-header relative overflow-hidden">
@@ -1731,5 +1819,6 @@ export function PublicStockView() {
         <p className="text-xs text-slate-400">{data?.shopTitle} · Godown stock catalogue</p>
       </footer>
     </div>
+    </PublicStockUserProvider>
   );
 }
