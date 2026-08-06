@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AddEntryForm from "./components/AddEntryForm";
 import EntryList from "./components/EntryList";
+import LedgerActionButtons from "./components/LedgerActionButtons";
 import NetAmountCard from "./components/NetAmountCard";
 import SheetsSyncBanner from "./components/SheetsSyncBanner";
 import { useConfig } from "./context/ConfigContext";
@@ -30,8 +31,9 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-100">
       <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 bg-zinc-100/95 backdrop-blur-sm">
-        <div className="mx-auto max-w-md px-3 py-2 sm:px-4">
+        <div className="mx-auto max-w-md space-y-2 px-3 py-2 sm:px-4">
           <NetAmountCard refreshTrigger={refreshTrigger} />
+          <LedgerActionButtons />
         </div>
       </div>
 
@@ -53,6 +55,7 @@ export default function Home() {
               refreshTrigger={refreshTrigger}
               limit={10}
               todayOnly
+              readOnly
               onRefresh={() => setRefreshTrigger((n) => n + 1)}
             />
           </section>

@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const to = searchParams.get("to");
 
     const userId = await getUserId(request);
-    const match: Record<string, unknown> = { businessId: userId };
+    const match: Record<string, unknown> = { businessId: userId, deleted: { $ne: true } };
     if (from || to) {
       match.date = {};
       if (from) (match.date as Record<string, string>).$gte = from;

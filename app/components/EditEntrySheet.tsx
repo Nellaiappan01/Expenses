@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
-import type { Entry, EntryType, PaymentMethod } from "@/lib/types";
+import type { Entry, PaymentMethod } from "@/lib/types";
+import { useUser } from "../context/UserContext";
 
 export function EditIcon() {
   return (
@@ -31,44 +32,69 @@ export default function EditEntrySheet({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [type, setType] = useState<EntryType>(entry.type);
+  const { userName } = useUser();
   const [name, setName] = useState(entry.name);
-  const [amount, setAmount] = useState(String(entry.amount));
+  const [amount, setAmount] = useState(String(Math.abs(entry.amount)));
   const [method, setMethod] = useState<PaymentMethod>(entry.method);
   const [bankName, setBankName] = useState(entry.bankName || "");
-  const [sender, setSender] = useState(entry.sender || "");
   const [date, setDate] = useState(entry.date);
+  const [category, setCategory] = useState(entry.category || "");
   const [note, setNote] = useState(entry.note || "");
+  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     setName(entry.name);
-    setAmount(String(entry.amount));
-    setMethod(entry.type === "rotation_cash" && entry.method === "GPay" ? "Cash" : entry.method);
+    setAmount(String(Math.abs(entry.amount)));
+    setMethod(entry.method);
     setBankName(entry.bankName || "");
-    setSender(entry.sender || "");
     setDate(entry.date);
+    setCategory(entry.category || "");
     setNote(entry.note || "");
-    setType(entry.type);
+    setReason("");
   }, [entry]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!reason.trim()) {
+      setError("Reason is required for adjustments");
+      return;
+    }
+
     setError("");
     setSaving(true);
     try {
-      const payload = {
-        type,
-        name: type === "rotation_cash" ? (sender.trim() || "Wallet") : type === "adjustment" ? (note.trim() || "Adjustment") : name.trim(),
-        amount: Number(amount),
-        method,
-        date,
-        note: note.trim(),
-        bankName: bankName.trim() || null,
-        sender: sender.trim() || null,
+      const numAmount = Number(amount);
+      const signedAmount =
+        entry.type === "worker_payment" || entry.type === "expense"
+          ? -Math.abs(numAmount)
+          : entry.amount >= 0
+            ? Math.abs(numAmount)
+            : -Math.abs(numAmount);
+
+      const payload: Record<string, unknown> = {
+        reason: reason.trim(),
+        editedBy: userName || "User",
       };
-      const res = await apiFetch(`/api/entries/${entry._id}`, {
+      if (name.trim() !== entry.name) payload.name = name.trim();
+      if (signedAmount !== entry.amount) payload.amount = signedAmount;
+      if (method !== entry.method) payload.method = method;
+      if (date !== entry.date) payload.date = date;
+      if ((category.trim() || "") !== (entry.category ?? "")) payload.category = category.trim();
+      if ((note.trim() || "") !== (entry.note ?? "")) payload.note = note.trim();
+      if (method === "Bank" && bankName.trim() !== (entry.bankName ?? "")) {
+        payload.bankName = bankName.trim();
+      }
+
+      const { reason: _r, editedBy: _e, ...changes } = payload;
+      if (Object.keys(changes).length === 0) {
+        setError("No changes to save");
+        setSaving(false);
+        return;
+      }
+
+      const res = await apiFetch(`/api/entries/${entry._id}/adjust`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -98,7 +124,7 @@ export default function EditEntrySheet({
         <div className="mx-auto max-w-md px-4 pt-3 pb-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              Edit Entry
+              Adjust Entry
             </h2>
             <button
               type="button"
@@ -112,147 +138,76 @@ export default function EditEntrySheet({
             </button>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-              {(["expense", "worker_payment", "adjustment", "rotation_cash"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setType(t)}
-                  className={`min-w-0 rounded-xl px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
-                    type === t
-                      ? "bg-emerald-600 text-white"
-                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                  }`}
-                >
-                  {t === "rotation_cash" ? "Wallet" : t === "worker_payment" ? "Worker" : t === "adjustment" ? "Adjust" : "Expense"}
-                </button>
-              ))}
-            </div>
-
-            {type === "expense" && (
+            {(entry.type === "worker_payment" || entry.type === "expense") && (
               <div>
-                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Name</label>
+                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  {entry.type === "worker_payment" ? "Worker name" : "Name"}
+                </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Name"
-                  required
-                  className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-                />
-              </div>
-            )}
-            {type === "worker_payment" && (
-              <div>
-                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Worker name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Worker name"
                   required
                   className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
                 />
               </div>
             )}
 
-            {type === "rotation_cash" && (
+            {entry.type === "worker_payment" && (
               <div>
-                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Who sent</label>
+                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Category
+                </label>
                 <input
                   type="text"
-                  value={sender}
-                  onChange={(e) => setSender(e.target.value)}
-                  placeholder="Who sent"
-                  required
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
                   className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
                 />
               </div>
             )}
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Amount</label>
+              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Amount
+              </label>
               <input
                 type="text"
                 inputMode="decimal"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.-]/g, ""))}
+                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
                 required
                 className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
               />
             </div>
 
-            {type !== "adjustment" && (
             <div>
               <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                {type === "rotation_cash" ? "Received" : "Method"}
+                Payment method
               </label>
-              {type === "rotation_cash" ? (
-                <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
+                {(["Cash", "GPay", "Bank"] as const).map((m) => (
                   <button
+                    key={m}
                     type="button"
-                    onClick={() => setMethod("Cash")}
+                    onClick={() => setMethod(m)}
                     className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      method === "Cash" ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+                      method === m
+                        ? "bg-amber-500 text-white"
+                        : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
                     }`}
                   >
-                    Cash
+                    {m}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setMethod("Bank")}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      method === "Bank" ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    Bank
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMethod("Cash")}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      method === "Cash" ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    Cash
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMethod("GPay")}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      method === "GPay" ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    GPay
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMethod("Bank")}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      method === "Bank" ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    Bank
-                  </button>
-                </div>
-              )}
-            </div>
-            )}
-
-            {type === "adjustment" && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
-                <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                  Balance correction. Use + amount to add, - amount to subtract.
-                </p>
+                ))}
               </div>
-            )}
+            </div>
 
-            {type === "rotation_cash" && method === "Bank" && (
+            {method === "Bank" && (
               <div>
-                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Bank</label>
+                <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Bank
+                </label>
                 <select
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
@@ -268,20 +223,20 @@ export default function EditEntrySheet({
 
             <div>
               <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                {type === "adjustment" ? "Reason for adjustment" : "Note"}
+                Note
               </label>
               <input
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder={type === "adjustment" ? "Reason for adjustment" : "Note"}
-                required={type === "adjustment"}
                 className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Date</label>
+              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Date
+              </label>
               <input
                 type="date"
                 value={date}
@@ -290,12 +245,26 @@ export default function EditEntrySheet({
               />
             </div>
 
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+              <label className="mb-1 block text-sm font-medium text-amber-800 dark:text-amber-200">
+                Reason for adjustment <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why is this being changed?"
+                required
+                className="w-full rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm dark:border-amber-800 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+            </div>
+
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-xl bg-emerald-600 py-3 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+              className="w-full rounded-xl bg-amber-500 py-3 font-medium text-white hover:bg-amber-600 disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save Changes"}
             </button>

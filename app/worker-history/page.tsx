@@ -8,6 +8,7 @@ import { useConfig } from "../context/ConfigContext";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
 import EditEntrySheet, { EditIcon, TrashIcon } from "../components/EditEntrySheet";
+import { useUser } from "../context/UserContext";
 
 interface NameWithTotal {
   name: string;
@@ -30,6 +31,7 @@ type FilterType = "expense" | "worker_payment" | "adjustment" | "all";
 export default function WorkerHistoryPage() {
   const router = useRouter();
   const { config } = useConfig() ?? {};
+  const { userName } = useUser();
   const [names, setNames] = useState<NameWithTotal[]>([]);
 
   useEffect(() => {
@@ -147,9 +149,15 @@ export default function WorkerHistoryPage() {
 
   async function handleDelete(entry: Entry, e: React.MouseEvent) {
     e.stopPropagation();
+    const reason = prompt("Reason for deletion (required):");
+    if (!reason?.trim()) return;
     if (!confirm("Delete this entry?")) return;
     try {
-      const res = await apiFetch(`/api/entries/${entry._id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/entries/${entry._id}/adjust`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim(), editedBy: userName || "User" }),
+      });
       if (res.ok && selectedNameLower) {
         setEntries((prev) => prev.filter((e) => e._id !== entry._id));
         fetchNames();

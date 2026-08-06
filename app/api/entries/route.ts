@@ -25,7 +25,9 @@ export async function POST(request: NextRequest) {
     } = body;
 
     if (!name?.trim()) {
-      return NextResponse.json({ error: "Worker name is required" }, { status: 400 });
+      const label =
+        type === "rotation_cash" ? "Description is required" : "Worker name is required";
+      return NextResponse.json({ error: label }, { status: 400 });
     }
     if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
       return NextResponse.json({ error: "Amount is required" }, { status: 400 });
@@ -126,7 +128,7 @@ export async function GET(request: NextRequest) {
     const db = await getDb();
     const entries = await db
       .collection("entries")
-      .find({ businessId: userId })
+      .find({ businessId: userId, deleted: { $ne: true } })
       .sort({ date: -1, createdAt: -1 })
       .toArray();
 

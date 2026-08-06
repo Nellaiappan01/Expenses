@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
 import EditEntrySheet, { EditIcon, TrashIcon } from "./EditEntrySheet";
+import { useUser } from "../context/UserContext";
 
 function formatDate(isoDate: string) {
   const d = new Date(isoDate.includes("T") ? isoDate : isoDate + "T12:00:00");
@@ -27,13 +28,16 @@ export default function EntryList({
   refreshTrigger = 0,
   limit,
   todayOnly = false,
+  readOnly = false,
   onRefresh,
 }: {
   refreshTrigger?: number;
   limit?: number;
   todayOnly?: boolean;
+  readOnly?: boolean;
   onRefresh?: () => void;
 }) {
+  const { userName } = useUser();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -83,12 +87,19 @@ export default function EntryList({
 
   async function handleDelete(entry: Entry, e: React.MouseEvent) {
     e.stopPropagation();
+    const reason = prompt("Reason for deletion (required):");
+    if (!reason?.trim()) return;
     if (!confirm("Delete this entry?")) return;
     try {
-      const res = await apiFetch(`/api/entries/${entry._id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/entries/${entry._id}/adjust`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim(), editedBy: userName || "User" }),
+      });
       if (res.ok) {
         setEntries((prev) => prev.filter((e) => e._id !== entry._id));
         setExpandedId(null);
+        onRefresh?.();
       }
     } catch (err) {
       console.error("Failed to delete:", err);
@@ -201,29 +212,31 @@ export default function EntryList({
                   </button>
                   {isExpanded && (
                     <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
-                      <div className="mb-3 flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingEntry(entry);
-                          }}
-                          className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                          aria-label="Edit"
-                        >
-                          <EditIcon />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleDelete(entry, e)}
-                          className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                          aria-label="Delete"
-                        >
-                          <TrashIcon />
-                          Delete
-                        </button>
-                      </div>
+                      {!readOnly && (
+                        <div className="mb-3 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingEntry(entry);
+                            }}
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                            aria-label="Edit"
+                          >
+                            <EditIcon />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDelete(entry, e)}
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                            aria-label="Delete"
+                          >
+                            <TrashIcon />
+                            Delete
+                          </button>
+                        </div>
+                      )}
                       <dl className="space-y-1 text-sm">
                         <div className="flex justify-between">
                           <dt className="text-zinc-500 dark:text-zinc-400">

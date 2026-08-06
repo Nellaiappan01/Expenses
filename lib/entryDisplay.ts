@@ -1,19 +1,54 @@
 import type { EntryType } from "./types";
 
-/** Money in (green): wallet inflows and positive adjustments. */
-export function isEntryInflow(type: EntryType, amount: number): boolean {
-  if (type === "rotation_cash") return true;
-  if (type === "expense" || type === "worker_payment") return false;
-  if (type === "adjustment") return amount >= 0;
-  return amount >= 0;
-}
+export type EntryListItem = {
+  type: EntryType;
+  amount: number;
+  deleted?: boolean;
+  isEdited?: boolean;
+};
 
-export function entryAmountColorClass(type: EntryType, amount: number): string {
-  return isEntryInflow(type, amount) ? "text-emerald-600" : "text-red-600";
-}
-
+/** Signed display amount with type-aware prefix. */
 export function formatEntryAmount(amount: number, type: EntryType): string {
-  const inflow = isEntryInflow(type, amount);
-  const sign = inflow ? "" : "-";
-  return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  const formatted = Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+
+  if (type === "rotation_cash") {
+    return amount >= 0 ? `+₹${formatted}` : `-₹${formatted}`;
+  }
+  if (type === "adjustment") {
+    return amount >= 0 ? `+₹${formatted}` : `-₹${formatted}`;
+  }
+  if (type === "expense" || type === "worker_payment") {
+    return `-₹${formatted}`;
+  }
+  return amount >= 0 ? `+₹${formatted}` : `-₹${formatted}`;
+}
+
+export function entryAmountColorClass(entry: EntryListItem): string {
+  if (entry.deleted) return "text-red-400 line-through";
+
+  switch (entry.type) {
+    case "rotation_cash":
+      return entry.amount >= 0 ? "text-blue-600" : "text-red-600";
+    case "adjustment":
+      return "text-amber-500";
+    case "expense":
+    case "worker_payment":
+      return "text-red-600";
+    default:
+      return entry.amount >= 0 ? "text-blue-600" : "text-red-600";
+  }
+}
+
+export function entryRowClass(entry: EntryListItem): string {
+  if (entry.deleted) {
+    return "border-red-200 bg-red-50/60";
+  }
+  return "border-zinc-200 bg-white";
+}
+
+export function entryTypeLabel(type: EntryType): string {
+  if (type === "rotation_cash") return "Wallet";
+  if (type === "worker_payment") return "Worker";
+  if (type === "adjustment") return "Adjustment";
+  return "Expense";
 }
