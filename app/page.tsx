@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import AddEntryForm from "./components/AddEntryForm";
 import EntryList from "./components/EntryList";
 import NetAmountCard from "./components/NetAmountCard";
+import SheetsSyncBanner from "./components/SheetsSyncBanner";
 import { useConfig } from "./context/ConfigContext";
 
 export default function Home() {
@@ -27,24 +28,33 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">
-      <div className="mx-auto max-w-md px-4 py-6 pb-12 sm:px-5">
-        <div className="space-y-8">
+    <div className="min-h-screen bg-zinc-100">
+      <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 bg-zinc-100/95 backdrop-blur-sm">
+        <div className="mx-auto max-w-md px-3 py-2 sm:px-4">
           <NetAmountCard refreshTrigger={refreshTrigger} />
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-md px-3 pb-12 pt-1 sm:px-4">
+        <div className="space-y-3">
+          <SheetsSyncBanner
+            refreshTrigger={refreshTrigger}
+            onRefresh={() => setRefreshTrigger((n) => n + 1)}
+          />
           <AddEntryForm
             onSuccess={() => setRefreshTrigger((n) => n + 1)}
             refreshTrigger={refreshTrigger}
           />
           <section>
-            <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              Entries
+            <h2 className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+              Today
             </h2>
             <EntryList
-            refreshTrigger={refreshTrigger}
-            limit={10}
-            todayOnly
-            onRefresh={() => setRefreshTrigger((n) => n + 1)}
-          />
+              refreshTrigger={refreshTrigger}
+              limit={10}
+              todayOnly
+              onRefresh={() => setRefreshTrigger((n) => n + 1)}
+            />
           </section>
         </div>
       </div>

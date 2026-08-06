@@ -5,7 +5,7 @@ import { apiFetch } from "@/lib/api";
 
 function formatAmount(amount: number) {
   const sign = amount >= 0 ? "" : "-";
-  return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 export default function NetAmountCard({
@@ -31,34 +31,26 @@ export default function NetAmountCard({
     fetchSummary();
   }, [fetchSummary, refreshTrigger]);
 
-  if (net === null) return null;
+  if (net === null) {
+    return (
+      <div className="h-16 animate-pulse rounded-xl bg-white/60" aria-hidden />
+    );
+  }
+
+  const positive = net >= 0;
 
   return (
     <div
-      className={`rounded-xl border px-4 py-3 shadow-sm ${
-        net >= 0
-          ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/50 dark:bg-emerald-950/30"
-          : "border-red-200 bg-red-50/80 dark:border-red-900/50 dark:bg-red-950/30"
+      className={`net-card-enter flex items-baseline justify-between rounded-xl px-4 py-2.5 ${
+        positive ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
       }`}
     >
-      <p
-        className={`text-xs font-semibold uppercase tracking-wider ${
-          net >= 0
-            ? "text-emerald-600/80 dark:text-emerald-400/80"
-            : "text-red-600/80 dark:text-red-400/80"
-        }`}
-      >
+      <span className="text-xs font-semibold uppercase tracking-widest opacity-80">
         Net
-      </p>
-      <p
-        className={`mt-1 text-xl font-bold tabular-nums ${
-          net >= 0
-            ? "text-emerald-700 dark:text-emerald-300"
-            : "text-red-700 dark:text-red-300"
-        }`}
-      >
+      </span>
+      <span className="text-2xl font-bold tabular-nums tracking-tight">
         {formatAmount(net)}
-      </p>
+      </span>
     </div>
   );
 }

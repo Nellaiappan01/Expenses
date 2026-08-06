@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { useConfig } from "@/app/context/ConfigContext";
-import type { EntryType, PaymentMethod } from "@/lib/types";
+import type { PaymentMethod } from "@/lib/types";
+import DateField from "./ui/DateField";
+import PaymentMethodToggle from "./ui/PaymentMethodToggle";
+import SearchableDropdown from "./ui/SearchableDropdown";
 
-const TYPE_FEATURES: Record<string, "expenses" | "workers"> = {
-  expense: "expenses",
-  worker_payment: "workers",
-};
+function todayISO() {
+  return new Date().toISOString().split("T")[0];
+}
 
 export default function AddEntryForm({
   onSuccess,
@@ -17,63 +18,97 @@ export default function AddEntryForm({
   onSuccess?: () => void;
   refreshTrigger?: number;
 }) {
-  const { config } = useConfig() ?? {};
-  const features = config?.features ?? { expenses: true, workers: true, stock: false };
-  const visibleTypes = (["expense", "worker_payment", "adjustment", "rotation_cash"] as const).filter(
-    (t) => !TYPE_FEATURES[t] || features[TYPE_FEATURES[t]]
-  );
-  const defaultType = visibleTypes[0] ?? "expense";
-  const [type, setType] = useState<EntryType>(defaultType);
-
-  useEffect(() => {
-    if (visibleTypes.length > 0 && !visibleTypes.includes(type)) {
-      setType(visibleTypes[0]);
-    }
-  }, [features.expenses, features.workers, type]);
-  const [name, setName] = useState("");
-  const [expenseNameOptions, setExpenseNameOptions] = useState<string[]>([]);
-  const [workerNameOptions, setWorkerNameOptions] = useState<string[]>([]);
-  const [noteOptions, setNoteOptions] = useState<string[]>([]);
-  const [bankOptions, setBankOptions] = useState<string[]>([]);
-  const nameOptions = type === "expense" ? expenseNameOptions : type === "worker_payment" ? workerNameOptions : [];
+  const [workerName, setWorkerName] = useState("");
+  const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("Cash");
-  const [bankName, setBankName] = useState("");
-  const [sender, setSender] = useState("");
-  const [date, setDate] = useState(() => {
-    const d = new Date();
-    return d.toISOString().split("T")[0];
-  });
   const [note, setNote] = useState("");
+  const [date, setDate] = useState(todayISO);
+  const [workerOptions, setWorkerOptions] = useState<string[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const workerRef = useRef<HTMLInputElement>(null);
+  const categoryRef = useRef<HTMLInputElement>(null);
+  const amountRef = useRef<HTMLInputElement>(null);
+  const noteRef = useRef<HTMLInputElement>(null);
+
+  const loadDefaults = useCallback(async () => {
+    const [defaultsRes, namesRes] = await Promise.all([
+      apiFetch("/api/defaults"),
+      apiFetch("/api/worker-history/names"),
+    ]);
+
+    const defaults = defaultsRes.ok
+      ? await defaultsRes.json()
+      : { workerNames: [], workerCategories: [] };
+    const namesFromEntries = namesRes.ok ? await namesRes.json() : [];
+
+    const workerFromDefaults = (defaults.workerNames ?? []) as string[];
+    const workerFromEntries = (namesFromEntries ?? []).map(
+      (n: { name: string }) => n.name
+    );
+    const seen = new Set<string>();
+    const workers: string[] = [];
+    for (const n of [...workerFromDefaults, ...workerFromEntries]) {
+      const trimmed = String(n).trim();
+      const key = trimmed.toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        workers.push(trimmed);
+      }
+    }
+    setWorkerOptions(workers.sort((a, b) => a.localeCompare(b)));
+    setCategoryOptions(defaults.workerCategories ?? []);
+  }, []);
 
   useEffect(() => {
-    Promise.all([
-      apiFetch("/api/defaults").then((r) => (r.ok ? r.json() : { expenseNames: [], workerNames: [] })),
-      apiFetch("/api/worker-history/names").then((r) => (r.ok ? r.json() : [])),
-    ]).then(([defaults, namesFromEntries]) => {
-      const expenseNames = ((defaults.expenseNames ?? []) as string[]).map((n) => String(n).trim()).filter(Boolean);
-      const workerFromDefaults = (defaults.workerNames ?? []).map((n: string) => String(n).trim()).filter(Boolean);
-      const workerFromEntries = (namesFromEntries ?? []).map((n: { name: string }) => n.name);
-      const seen = new Set<string>();
-      const workerCombined: string[] = [];
-      for (const n of [...workerFromDefaults, ...workerFromEntries]) {
-        const key = String(n).trim().toLowerCase();
-        if (key && !seen.has(key)) {
-          seen.add(key);
-          workerCombined.push(String(n).trim());
-        }
-      }
-      setExpenseNameOptions([...new Set(expenseNames)].sort((a, b) => a.localeCompare(b)) as string[]);
-      setWorkerNameOptions(workerCombined.sort((a, b) => a.localeCompare(b)));
-      setNoteOptions(defaults.notes ?? []);
-      setBankOptions(defaults.banks ?? []);
-    });
-  }, [refreshTrigger]);
+    loadDefaults();
+  }, [loadDefaults, refreshTrigger]);
+
+  useEffect(() => {
+    if (!success) return;
+    const timer = setTimeout(() => setSuccess(false), 2500);
+    return () => clearTimeout(timer);
+  }, [success]);
+
+  function resetForm(keepMethod: PaymentMethod) {
+    setWorkerName("");
+    setCategory("");
+    setAmount("");
+    setNote("");
+    setDate(todayISO());
+    setMethod(keepMethod);
+    setError("");
+    requestAnimationFrame(() => workerRef.current?.focus());
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
+
+    const trimmedName = workerName.trim();
+    const trimmedCategory = category.trim();
+    const numAmount = Number(amount);
+
+    if (!trimmedName) {
+      setError("Worker name is required");
+      workerRef.current?.focus();
+      return;
+    }
+    if (!trimmedCategory) {
+      setError("Category is required");
+      categoryRef.current?.focus();
+      return;
+    }
+    if (!amount || Number.isNaN(numAmount) || numAmount <= 0) {
+      setError("Enter a valid amount");
+      amountRef.current?.focus();
+      return;
+    }
+
     setError("");
     setSaving(true);
 
@@ -82,14 +117,13 @@ export default function AddEntryForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type,
-          name: type === "rotation_cash" ? (sender.trim() || "Wallet") : type === "adjustment" ? (note.trim() || "Adjustment") : name.trim(),
-          amount: Number(amount),
+          type: "worker_payment",
+          name: trimmedName,
+          category: trimmedCategory,
+          amount: numAmount,
           method,
           date,
           note: note.trim() || undefined,
-          bankName: bankName.trim() || undefined,
-          sender: sender.trim() || undefined,
         }),
       });
 
@@ -98,15 +132,11 @@ export default function AddEntryForm({
         throw new Error(data.error || "Failed to save");
       }
 
-      setName("");
-      setAmount("");
-      setNote("");
-      setBankName("");
-      setSender("");
-      setType("expense");
-      setMethod("Cash");
-      setDate(new Date().toISOString().split("T")[0]);
+      const savedMethod = method;
+      resetForm(savedMethod);
+      setSuccess(true);
       onSuccess?.();
+      loadDefaults();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -117,250 +147,111 @@ export default function AddEntryForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-5"
+      className="form-enter rounded-2xl bg-white p-3 shadow-sm sm:p-4"
     >
-      <div className="space-y-4">
-        <div className="grid w-full grid-cols-4 gap-1.5">
-          {visibleTypes.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => {
-                    setType(t);
-                    if (t === "rotation_cash") {
-                      if (method === "GPay") setMethod("Cash");
-                    } else {
-                      setBankName("");
-                      setSender("");
-                      if (method === "Bank") setMethod("Cash");
-                    }
-                  }}
-                  className={`min-w-0 rounded-xl px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:py-3 sm:text-sm ${
-                    type === t
-                      ? "bg-emerald-600 text-white"
-                      : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                  }`}
-                >
-                  {t === "rotation_cash" ? "Wallet" : t === "worker_payment" ? "Worker" : t === "adjustment" ? "Adjust" : "Expense"}
-                </button>
-              )
-            )}
-        </div>
+      <div className="space-y-3">
+        <DateField
+          value={date}
+          onChange={setDate}
+          onEnter={() => workerRef.current?.focus()}
+        />
 
-        {type === "expense" && (
-          <div>
-            <input
-              id="name"
-              type="text"
-              list="name-list"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Name (select or type new)"
-              required
-              autoComplete="off"
-              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-            />
-            <datalist id="name-list">
-              {nameOptions.map((opt) => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-          </div>
-        )}
+        <SearchableDropdown
+          label="Worker"
+          value={workerName}
+          onChange={setWorkerName}
+          options={workerOptions}
+          placeholder="Search or type name…"
+          addNewLabel="Add New Worker"
+          required
+          inputRef={workerRef}
+          onEnter={() => categoryRef.current?.focus()}
+        />
 
-        {type === "worker_payment" && (
-          <div>
-            <input
-              id="name"
-              type="text"
-              list="name-list"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Worker name (select or type)"
-              required
-              autoComplete="off"
-              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-            />
-            <datalist id="name-list">
-              {nameOptions.map((opt) => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-          </div>
-        )}
-
-        {type === "rotation_cash" && (
-          <div>
-            <input
-              id="sender"
-              type="text"
-              value={sender}
-              onChange={(e) => setSender(e.target.value)}
-              placeholder="Who sent"
-              required
-              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-            />
-          </div>
-        )}
-
-        <div>
-          <input
-            id="amount"
-            type="text"
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.-]/g, ""))}
-            placeholder={type === "adjustment" ? "Amount (+ to add, - to subtract)" : "Amount"}
-            required
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 [font-size:16px]"
-          />
-        </div>
-
-        {type !== "adjustment" && (
-        <div>
-          <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            {type === "rotation_cash" ? "Received" : "Method"}
-          </label>
-          {type === "rotation_cash" ? (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setMethod("Cash")}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                  method === "Cash"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                }`}
-              >
-                Cash
-              </button>
-              <button
-                type="button"
-                onClick={() => setMethod("Bank")}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                  method === "Bank"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                }`}
-              >
-                Bank
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setMethod("Cash")}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                  method === "Cash"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                }`}
-              >
-                Cash
-              </button>
-              <button
-                type="button"
-                onClick={() => setMethod("GPay")}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                  method === "GPay"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                }`}
-              >
-                GPay
-              </button>
-            </div>
-          )}
-        </div>
-        )}
-
-        {type === "adjustment" && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
-            <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-              Balance correction. Use + amount to add, - amount to subtract.
-            </p>
-          </div>
-        )}
-
-        {type === "rotation_cash" && method === "Bank" && (
-              <div>
-                <select
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-                >
-                  <option value="">Select bank</option>
-                  {bankOptions.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-                {bankOptions.length === 0 && (
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    Add banks in Defaults
-                  </p>
-                )}
-              </div>
-        )}
-
-        <div>
-          <input
-            id="note"
-            type="text"
-            list="note-list"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder={type === "adjustment" ? "Reason for adjustment (required)" : "Note"}
-            required={type === "adjustment"}
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-          />
-          <datalist id="note-list">
-            {noteOptions.map((opt) => (
-              <option key={opt} value={opt} />
-            ))}
-          </datalist>
-          {noteOptions.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {noteOptions.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setNote(opt)}
-                  className="rounded-lg bg-zinc-100 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <SearchableDropdown
+          label="Category"
+          value={category}
+          onChange={setCategory}
+          options={categoryOptions}
+          placeholder="Search category…"
+          addNewLabel="Add New Category"
+          required
+          inputRef={categoryRef}
+          onEnter={() => amountRef.current?.focus()}
+        />
 
         <div>
           <label
-            htmlFor="date"
-            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            htmlFor="amount"
+            className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500"
           >
-            Date
+            Amount <span className="text-red-500">*</span>
           </label>
           <input
-            id="date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+            ref={amountRef}
+            id="amount"
+            type="text"
+            inputMode="decimal"
+            enterKeyHint="next"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                noteRef.current?.focus();
+              }
+            }}
+            placeholder="₹ 0"
+            required
+            className="w-full rounded-xl bg-zinc-100 px-4 py-3.5 text-xl font-semibold tabular-nums text-zinc-900 placeholder-zinc-400 outline-none transition-colors focus:bg-zinc-50 focus:ring-2 focus:ring-emerald-500/30 [font-size:16px]"
+          />
+        </div>
+
+        <PaymentMethodToggle value={method} onChange={setMethod} />
+
+        <div>
+          <label
+            htmlFor="note"
+            className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500"
+          >
+            Note <span className="font-normal normal-case text-zinc-400">(optional)</span>
+          </label>
+          <input
+            ref={noteRef}
+            id="note"
+            type="text"
+            enterKeyHint="done"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add a note…"
+            className="w-full rounded-xl bg-zinc-100 px-4 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition-colors focus:bg-zinc-50 focus:ring-2 focus:ring-emerald-500/30 [font-size:16px]"
           />
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <p className="text-sm text-red-600" role="alert">
+            {error}
+          </p>
+        )}
+
+        {success && (
+          <div
+            className="success-enter flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700"
+            role="status"
+          >
+            <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            Entry saved successfully
+          </div>
         )}
 
         <button
           type="submit"
           disabled={saving}
-          className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-60 dark:focus:ring-offset-zinc-900"
+          className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-semibold text-white transition-all duration-200 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : "Save Entry"}
         </button>
       </div>
     </form>

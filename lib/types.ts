@@ -1,5 +1,6 @@
 export type EntryType = "rotation_cash" | "expense" | "worker_payment" | "adjustment";
 export type PaymentMethod = "Cash" | "GPay" | "Bank";
+export type SheetsSyncStatus = "synced" | "pending" | "failed";
 
 export interface Entry {
   _id?: string;
@@ -9,11 +10,15 @@ export interface Entry {
   amount: number;
   method: PaymentMethod;
   date: string; // ISO date
+  category?: string;
   note?: string;
   bankName?: string;
   sender?: string;
   businessId: string;
   createdAt: Date;
+  sheetsSyncStatus?: SheetsSyncStatus;
+  sheetsSyncError?: string;
+  sheetsSyncedAt?: Date;
 }
 
 export interface EntryInput {
@@ -22,6 +27,7 @@ export interface EntryInput {
   amount: number;
   method: PaymentMethod;
   date: string;
+  category?: string;
   note?: string;
   bankName?: string;
   sender?: string;

@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 
+import { mergeCategories } from "@/lib/entryCategories";
+
 export interface DefaultsDoc {
   businessId: string;
   names?: string[];
   expenseNames?: string[];
   workerNames?: string[];
+  workerCategories?: string[];
   notes: string[];
   banks: string[];
 }
@@ -23,19 +26,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       expenseNames: doc?.expenseNames ?? legacyNames,
       workerNames: doc?.workerNames ?? [],
+      workerCategories: mergeCategories(doc?.workerCategories),
       notes: doc?.notes ?? [],
       banks: doc?.banks ?? [],
     });
   } catch (error) {
     console.error("Error fetching defaults:", error);
-    return NextResponse.json({ expenseNames: [], workerNames: [], notes: [], banks: [] });
+    return NextResponse.json({ expenseNames: [], workerNames: [], workerCategories: mergeCategories([]), notes: [], banks: [] });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { expenseNames, workerNames, notes, banks } = body;
+    const { expenseNames, workerNames, workerCategories, notes, banks } = body;
 
     const userId = await getUserId(request);
     const db = await getDb();
@@ -46,6 +50,7 @@ export async function POST(request: NextRequest) {
           businessId: userId,
           expenseNames: Array.isArray(expenseNames) ? expenseNames : [],
           workerNames: Array.isArray(workerNames) ? workerNames : [],
+          workerCategories: Array.isArray(workerCategories) ? workerCategories : [],
           notes: Array.isArray(notes) ? notes : [],
           banks: Array.isArray(banks) ? banks : [],
         },
