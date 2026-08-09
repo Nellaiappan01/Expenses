@@ -157,7 +157,7 @@ export default function AddEntryForm({
         />
 
         <SearchableDropdown
-          label="Worker"
+          label="Name"
           value={workerName}
           onChange={setWorkerName}
           options={workerOptions}

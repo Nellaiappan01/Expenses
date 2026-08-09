@@ -13,6 +13,7 @@ export default function Home() {
   const router = useRouter();
   const { config } = useConfig() ?? {};
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [showActions, setShowActions] = useState(false);
 
   useEffect(() => {
     const features = config?.features ?? { expenses: false, workers: false, stock: false };
@@ -32,8 +33,12 @@ export default function Home() {
     <div className="min-h-screen bg-zinc-100">
       <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 bg-zinc-100/95 backdrop-blur-sm">
         <div className="mx-auto max-w-md space-y-2 px-3 py-2 sm:px-4">
-          <NetAmountCard refreshTrigger={refreshTrigger} />
-          <LedgerActionButtons />
+          <NetAmountCard
+            refreshTrigger={refreshTrigger}
+            showActions={showActions}
+            onToggleActions={() => setShowActions((v) => !v)}
+          />
+          {showActions ? <LedgerActionButtons /> : null}
         </div>
       </div>
 
