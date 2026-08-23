@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
 import type { Entry, PaymentMethod } from "@/lib/types";
+import SearchableDropdown from "./ui/SearchableDropdown";
 import { useUser } from "../context/UserContext";
 
 export function EditIcon() {
@@ -14,10 +15,23 @@ export function EditIcon() {
   );
 }
 
-export function TrashIcon() {
+export function TrashIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
-    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
+
+export function LockIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+      />
     </svg>
   );
 }
@@ -27,11 +41,14 @@ export default function EditEntrySheet({
   bankOptions,
   onClose,
   onSuccess,
+  hideApprovalField = false,
 }: {
   entry: Entry;
   bankOptions: string[];
   onClose: () => void;
   onSuccess: () => void;
+  /** When true, only amount/notes etc. — not the on-site approval picker. */
+  hideApprovalField?: boolean;
 }) {
   const { userName } = useUser();
   const [name, setName] = useState(entry.name);
@@ -40,10 +57,22 @@ export default function EditEntrySheet({
   const [bankName, setBankName] = useState(entry.bankName || "");
   const [date, setDate] = useState(entry.date);
   const [category, setCategory] = useState(entry.category || "");
+  const [approvedBy, setApprovedBy] = useState(entry.approvedBy || "");
   const [note, setNote] = useState(entry.note || "");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [approverOptions, setApproverOptions] = useState<string[]>([]);
+
+  const showApprovedBy =
+    !hideApprovalField && entry.type === "expense" && entry.approvalStatus === "pending";
+
+  useEffect(() => {
+    if (!showApprovedBy) return;
+    apiFetch("/api/defaults")
+      .then((r) => (r.ok ? r.json() : { approverNames: [] }))
+      .then((d) => setApproverOptions(d.approverNames ?? []));
+  }, [showApprovedBy]);
 
   useEffect(() => {
     setName(entry.name);
@@ -52,6 +81,7 @@ export default function EditEntrySheet({
     setBankName(entry.bankName || "");
     setDate(entry.date);
     setCategory(entry.category || "");
+    setApprovedBy(entry.approvedBy || "");
     setNote(entry.note || "");
     setReason("");
   }, [entry]);
@@ -79,6 +109,9 @@ export default function EditEntrySheet({
       if (date !== entry.date) payload.date = date;
       if ((category.trim() || "") !== (entry.category ?? "")) payload.category = category.trim();
       if ((note.trim() || "") !== (entry.note ?? "")) payload.note = note.trim();
+      if (showApprovedBy && approvedBy.trim() !== (entry.approvedBy ?? "")) {
+        payload.approvedBy = approvedBy.trim();
+      }
       if (method === "Bank" && bankName.trim() !== (entry.bankName ?? "")) {
         payload.bankName = bankName.trim();
       }
@@ -120,7 +153,7 @@ export default function EditEntrySheet({
         <div className="mx-auto max-w-md px-4 pt-3 pb-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              Adjust Entry
+              {hideApprovalField ? "Edit entry details" : "Adjust Entry"}
             </h2>
             <button
               type="button"
@@ -161,6 +194,18 @@ export default function EditEntrySheet({
                   className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
                 />
               </div>
+            )}
+
+            {showApprovedBy && (
+              <SearchableDropdown
+                label="Approved by"
+                value={approvedBy}
+                onChange={setApprovedBy}
+                options={approverOptions}
+                placeholder="Who approved on site?"
+                addNewLabel="Add approver"
+                required
+              />
             )}
 
             <div>

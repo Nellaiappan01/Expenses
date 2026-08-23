@@ -398,7 +398,7 @@ export default function SearchableDropdown({
         />
       )}
 
-      {/* Hidden input for form validation / ref forwarding on mobile */}
+      {/* Hidden input for form validation on mobile — do not open sheet on programmatic focus */}
       {isMobile && required ? (
         <input
           ref={inputRef}
@@ -408,7 +408,6 @@ export default function SearchableDropdown({
           tabIndex={-1}
           aria-hidden
           className="pointer-events-none absolute h-0 w-0 opacity-0"
-          onFocus={openPicker}
           onChange={() => {}}
         />
       ) : null}

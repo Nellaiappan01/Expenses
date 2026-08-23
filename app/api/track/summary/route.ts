@@ -26,7 +26,13 @@ export async function GET(request: NextRequest) {
         totalAmount: 0,
         totalEntries: 0,
         categoryBreakdown: [],
+        requestedByBreakdown: [],
         payments: [],
+        workflowTotals: {
+          pendingApproval: { amount: 0, count: 0 },
+          paymentPending: { amount: 0, count: 0 },
+          paidVerified: { amount: 0, count: 0 },
+        },
       },
       { status: 500 }
     );

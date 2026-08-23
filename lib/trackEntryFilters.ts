@@ -1,3 +1,5 @@
+import { SHEETS_SYNC_DEFERRED_NOR } from "./googleSheetsSync";
+
 export type TrackFilterParams = {
   from?: string | null;
   to?: string | null;
@@ -5,8 +7,14 @@ export type TrackFilterParams = {
   requestedBy?: string | null;
   approvedBy?: string | null;
   method?: string | null;
+  /** Admin verified payment: Cash | GPay | Bank */
+  paidVia?: string | null;
   tag?: string | null;
   search?: string | null;
+  /** approval_pending | payment_pending | paid */
+  workflowStatus?: string | null;
+  /** pending | failed — Google Sheets sync queue */
+  sheetsSync?: string | null;
 };
 
 function escapeRegex(value: string) {
@@ -76,6 +84,15 @@ export function buildTrackEntryMatch(
     match.method = method;
   }
 
+  const paidVia = filters.paidVia?.trim();
+  if (paidVia === "Cash") {
+    match.paymentVerifiedMethod = "Cash";
+  } else if (paidVia === "GPay") {
+    match.paymentVerifiedMethod = "GPay / UPI";
+  } else if (paidVia === "Bank") {
+    match.paymentVerifiedMethod = "Bank Transfer";
+  }
+
   const tag = filters.tag?.trim();
   if (tag) {
     match.tags = { $regex: escapeRegex(tag), $options: "i" };
@@ -85,6 +102,43 @@ export function buildTrackEntryMatch(
   const searchOr = search ? buildSearchOr(search) : [];
   if (searchOr.length > 0) {
     match.$or = searchOr;
+  }
+
+  const workflowStatus = filters.workflowStatus?.trim();
+  if (workflowStatus === "approval_pending") {
+    match.type = "expense";
+    match.approvalStatus = "pending";
+  } else if (workflowStatus === "payment_pending") {
+    match.type = "expense";
+    match.approvalStatus = "approved";
+    match.paymentStatus = "pending";
+  } else if (workflowStatus === "paid") {
+    const paidOr = [
+      { type: { $ne: "expense" } },
+      { paymentStatus: "paid" },
+      {
+        type: "expense",
+        paymentStatus: { $exists: false },
+        approvalStatus: { $exists: false },
+      },
+    ];
+    if (match.$or) {
+      match.$and = [{ $or: match.$or }, { $or: paidOr }];
+      delete match.$or;
+    } else {
+      match.$or = paidOr;
+    }
+  }
+
+  const sheetsSync = filters.sheetsSync?.trim();
+  if (sheetsSync === "pending" || sheetsSync === "failed") {
+    match.sheetsSyncStatus = sheetsSync;
+    const nor = [SHEETS_SYNC_DEFERRED_NOR];
+    if (match.$nor) {
+      match.$nor = [...(match.$nor as unknown[]), ...nor];
+    } else {
+      match.$nor = nor;
+    }
   }
 
   return match;
@@ -98,7 +152,10 @@ export function trackFiltersFromSearchParams(searchParams: URLSearchParams): Tra
     requestedBy: searchParams.get("requestedBy"),
     approvedBy: searchParams.get("approvedBy"),
     method: searchParams.get("method"),
+    paidVia: searchParams.get("paidVia"),
     tag: searchParams.get("tag"),
     search: searchParams.get("search"),
+    workflowStatus: searchParams.get("workflowStatus"),
+    sheetsSync: searchParams.get("sheetsSync"),
   };
 }

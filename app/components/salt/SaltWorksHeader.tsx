@@ -62,7 +62,7 @@ export default function SaltWorksHeader() {
   const router = useRouter();
   const pathname = usePathname();
   const isHome = pathname === "/";
-  const { userName, clearUser } = useUser();
+  const { userName, clearUser, isAdmin } = useUser();
   const { config } = useConfig() ?? {};
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -190,6 +190,33 @@ export default function SaltWorksHeader() {
                 >
                   Report
                 </Link>
+                {config?.features?.profitability && (
+                  <Link
+                    href="/profitability"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center rounded-xl px-4 py-3 font-medium text-[#0B4A8C] hover:bg-[#EEF5FC]"
+                  >
+                    Profitability
+                  </Link>
+                )}
+                {isAdmin && (
+                  <>
+                    <Link
+                      href="/admin"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center rounded-xl px-4 py-3 font-medium text-[#0B4A8C] hover:bg-[#EEF5FC]"
+                    >
+                      Admin Settings
+                    </Link>
+                    <Link
+                      href="/admin/payments"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center rounded-xl px-4 py-3 font-medium text-[#0B4A8C] hover:bg-[#EEF5FC]"
+                    >
+                      Payment Management
+                    </Link>
+                  </>
+                )}
                 <Link
                   href="/select-user"
                   onClick={() => setMenuOpen(false)}

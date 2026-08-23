@@ -49,7 +49,7 @@ export default function StickyOpeningBalance({
         ref={barRef}
         className={
           pinned
-            ? "fixed inset-x-0 top-0 z-40 border-b border-[#D6E6F5] bg-[#F4F8FC] pt-[env(safe-area-inset-top)] shadow-lg"
+            ? "fixed inset-x-0 top-0 z-40 border-b border-[var(--border-soft)] bg-[var(--background)]/95 pt-[env(safe-area-inset-top)] shadow-sm backdrop-blur-md"
             : "relative z-10"
         }
       >

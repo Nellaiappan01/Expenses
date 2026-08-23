@@ -3,15 +3,18 @@
  *
  * SETUP:
  * 1. Create a Google Sheet with Row 1 headers (exact order):
- *    Date | Opening Balance | Category | Expenses Amount | Notes | Add on | Source | Closing Balance | Requested by | Approved by | Entry ID | Adjust Reason
+ *    Date | Opening Balance | Category | Expenses Amount | Notes | Add on | Source | Closing Balance | Requested by | Approved by | Payment Status | Adjust Reason | Entry ID
  * 2. Extensions → Apps Script → paste this entire file → Save
  * 3. Deploy → New deployment → Web app
  *    - Execute as: Me
  *    - Who has access: Anyone
  * 4. Copy the Web App URL into your account settings (or .env for hariharan@gmail.com default)
  *
- * Column K: Entry ID — stored automatically for update/delete sync.
- * Column L: Adjust Reason — filled when an entry is edited in the app.
+ * Column K: Payment Status — Pending Approval / Payment Pending / Paid / Verified
+ * Column L: Adjust Reason — filled when an entry is edited in the app
+ * Column M: Entry ID — stored automatically for update/delete sync
+ *
+ * Version: 2026-08-24 (Payment workflow + admin edit/delete sync)
  */
 
 const COL = {
@@ -25,9 +28,13 @@ const COL = {
   CLOSING: 8,
   REQUESTED_BY: 9,
   APPROVED_BY: 10,
-  ENTRY_ID: 11,
+  PAYMENT_STATUS: 11,
   ADJUST_REASON: 12,
+  ENTRY_ID: 13,
 };
+
+/** Legacy sheets had Entry ID in column K before Payment Status was added. */
+const LEGACY_ENTRY_ID_COL = 11;
 
 function doPost(e) {
   try {
@@ -59,7 +66,8 @@ function doAppend_(sheet, data) {
 
   const expenseAmount = Number(data.expenseAmount) || 0;
   const addOn = Number(data.addOn) || 0;
-  const closing = opening - expenseAmount + addOn;
+  const effectiveExpense = paymentStatusCountsExpense_(data.paymentStatus) ? expenseAmount : 0;
+  const closing = opening - effectiveExpense + addOn;
 
   const row = [
     formatDate_(data.date),
@@ -72,8 +80,9 @@ function doAppend_(sheet, data) {
     closing,
     data.requestedBy || "",
     data.approvedBy || "",
-    data.entryId || "",
+    data.paymentStatus || "",
     data.adjustReason || "",
+    data.entryId || "",
   ];
 
   sheet.appendRow(row);
@@ -105,11 +114,14 @@ function doUpdate_(sheet, data) {
   sheet.getRange(row, COL.SOURCE).setValue(data.source || "");
   sheet.getRange(row, COL.REQUESTED_BY).setValue(data.requestedBy || "");
   sheet.getRange(row, COL.APPROVED_BY).setValue(data.approvedBy || "");
-  if (data.entryId) {
-    sheet.getRange(row, COL.ENTRY_ID).setValue(data.entryId);
+  if (data.paymentStatus !== undefined) {
+    sheet.getRange(row, COL.PAYMENT_STATUS).setValue(data.paymentStatus || "");
   }
   if (data.adjustReason) {
     sheet.getRange(row, COL.ADJUST_REASON).setValue(data.adjustReason);
+  }
+  if (data.entryId) {
+    sheet.getRange(row, COL.ENTRY_ID).setValue(data.entryId);
   }
 
   recalculateFromRow_(sheet, row);
@@ -151,6 +163,11 @@ function findRowByEntryId_(sheet, entryId) {
 
   for (let r = 2; r <= lastRow; r++) {
     const cell = String(sheet.getRange(r, COL.ENTRY_ID).getValue()).trim();
+    if (cell === id) return r;
+  }
+
+  for (let r = 2; r <= lastRow; r++) {
+    const cell = String(sheet.getRange(r, LEGACY_ENTRY_ID_COL).getValue()).trim();
     if (cell === id) return r;
   }
   return 0;
@@ -198,7 +215,9 @@ function recalculateFromRow_(sheet, startRow) {
 
   for (let r = startRow; r <= lastRow; r++) {
     const opening = prevClosing;
-    const expense = Number(sheet.getRange(r, COL.EXPENSE).getValue()) || 0;
+    const expense = expenseCountsTowardBalance_(sheet, r)
+      ? Number(sheet.getRange(r, COL.EXPENSE).getValue()) || 0
+      : 0;
     const addOn = Number(sheet.getRange(r, COL.ADD_ON).getValue()) || 0;
     const closing = opening - expense + addOn;
 
@@ -206,6 +225,22 @@ function recalculateFromRow_(sheet, startRow) {
     sheet.getRange(r, COL.CLOSING).setValue(closing);
     prevClosing = closing;
   }
+}
+
+function expenseCountsTowardBalance_(sheet, row) {
+  const status = String(sheet.getRange(row, COL.PAYMENT_STATUS).getValue()).trim();
+  return paymentStatusCountsExpense_(status, true);
+}
+
+function paymentStatusCountsExpense_(status, isLegacyHexId) {
+  const s = String(status || "").trim();
+  if (!s) return true;
+  if (s === "Paid / Verified") return true;
+  if (s === "Pending Approval" || s === "Payment Pending") return false;
+  if (s === "Rejected") return false;
+  // Legacy sheets stored Entry ID in column K before Payment Status existed
+  if (isLegacyHexId && /^[a-f0-9]{24}$/i.test(s)) return true;
+  return true;
 }
 
 function getLastClosingBalance_(sheet) {

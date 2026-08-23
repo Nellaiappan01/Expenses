@@ -17,6 +17,7 @@ function getTodayHref() {
 const baseNavItems = [
   { href: "/track", label: "Today's entries", icon: TodayIcon, ledger: true, dynamicHref: getTodayHref },
   { href: "/report", label: "Report", icon: ReportIcon, anyFeature: true },
+  { href: "/profitability", label: "Profitability", icon: ProfitabilityIcon, feature: "profitability" as const },
   { href: "/worker-history", label: "Worker details", icon: WorkerDetailsIcon, feature: "workers" as const },
   { href: "/stock", label: "Stock", icon: StockIcon, feature: "stock" as const },
   { href: "/stock/out", label: "Stock Out", icon: StockOutIcon, feature: "stock" as const },
@@ -25,7 +26,12 @@ const baseNavItems = [
   { href: "/defaults", label: "Defaults", icon: SettingsIcon, ledger: true },
   { href: "/settings", label: "Account & Sheet", icon: SettingsIcon, ledger: true },
 ];
-const adminNavItem = { href: "/admin", label: "Admin", icon: SettingsIcon };
+const adminNavItem = { href: "/admin", label: "Admin Settings", icon: SettingsIcon };
+const adminPaymentsNavItem = {
+  href: "/admin/payments",
+  label: "Payment Management",
+  icon: SettingsIcon,
+};
 
 function TodayIcon() {
   return (
@@ -39,6 +45,19 @@ function ReportIcon() {
   return (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  );
+}
+
+function ProfitabilityIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+      />
     </svg>
   );
 }
@@ -190,7 +209,7 @@ export default function AppHeader() {
                 </button>
               </div>
               <div className="space-y-1">
-                {(isAdmin ? [...baseNavItems, adminNavItem] : baseNavItems)
+                {(isAdmin ? [...baseNavItems, adminNavItem, adminPaymentsNavItem] : baseNavItems)
                   .filter((item) => {
                     const features = config?.features ?? { expenses: false, workers: false, stock: false };
                     const hasLedger = features.expenses || features.workers;

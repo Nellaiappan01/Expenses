@@ -61,7 +61,16 @@ export const ENTRY_TOTALS_GROUP_FIELDS = {
   },
   expense: {
     $sum: {
-      $cond: [{ $eq: ["$type", "expense"] }, { $abs: "$amount" }, 0],
+      $cond: [
+        {
+          $and: [
+            { $eq: ["$type", "expense"] },
+            { $eq: [{ $ifNull: ["$paymentStatus", "paid"] }, "paid"] },
+          ],
+        },
+        { $abs: "$amount" },
+        0,
+      ],
     },
   },
   workerPayment: {

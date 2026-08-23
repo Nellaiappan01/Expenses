@@ -40,6 +40,7 @@ export type LedgerRow = {
   closingBalance: number;
   requestedBy: string;
   approvedBy: string;
+  paymentStatus: string;
 };
 
 export function buildLedgerRows(entries: Entry[], startingBalance = 0): LedgerRow[] {
@@ -59,6 +60,8 @@ export function buildLedgerRows(entries: Entry[], startingBalance = 0): LedgerRo
       note: e.note,
       bankName: e.bankName,
       approvedBy: e.approvedBy,
+      approvalStatus: e.approvalStatus,
+      paymentStatus: e.paymentStatus,
     });
     balance += entryBalanceDelta(e);
     rows.push({
@@ -72,6 +75,7 @@ export function buildLedgerRows(entries: Entry[], startingBalance = 0): LedgerRo
       closingBalance: balance,
       requestedBy: payload.requestedBy,
       approvedBy: payload.approvedBy,
+      paymentStatus: payload.paymentStatus ?? "",
     });
   }
 

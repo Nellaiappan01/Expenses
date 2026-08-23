@@ -8,6 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { apiFetch } from "@/lib/api";
 
 const USER_KEY = "ledger_user_id";
 
@@ -64,6 +65,39 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setUsername(data.username || data.userId || null);
     setIsAdmin(!!data.isAdmin);
   }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch("/api/auth/me");
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setIsAdmin(!!data.isAdmin);
+        setUserName(data.name || data.userId);
+        setUsername(data.username || data.userId);
+        const stored = readStoredUser();
+        if (stored) {
+          localStorage.setItem(
+            USER_KEY,
+            JSON.stringify({
+              ...stored,
+              userName: data.name || stored.userName,
+              username: data.username || stored.username,
+              isAdmin: !!data.isAdmin,
+            })
+          );
+        }
+      } catch {
+        /* keep cached values */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const setUser = useCallback((data: {
     token?: string;

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import { useConfig } from "@/app/context/ConfigContext";
 import { useUser } from "@/app/context/UserContext";
 import { isPublicRoute } from "@/lib/publicRoutes";
@@ -107,6 +108,7 @@ function stockPathActive(pathname: string, href: string, viewPath?: string | nul
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { config } = useConfig() ?? {};
   const { userId, username } = useUser();
 
@@ -123,45 +125,84 @@ export default function Navbar() {
 
   const useStockBar = hasStock && (onStockArea || onPublicView);
 
-  const navItems = useStockBar
-    ? [
-        ...stockNavItems.slice(0, 3),
-        ...(viewPath ? [{ href: viewPath, label: "View", icon: ViewIcon }] : []),
-        stockNavItems[3],
-      ]
-    : ledgerNavItems.filter((item) => {
-        const hasLedger = features.expenses || features.workers;
-        if ("ledger" in item && item.ledger) return hasLedger;
-        return true;
-      });
+  const navItems = useMemo(
+    () =>
+      useStockBar
+        ? [
+            ...stockNavItems.slice(0, 3),
+            ...(viewPath ? [{ href: viewPath, label: "View", icon: ViewIcon }] : []),
+            stockNavItems[3],
+          ]
+        : ledgerNavItems.filter((item) => {
+            const hasLedger = features.expenses || features.workers;
+            if ("ledger" in item && item.ledger) return hasLedger;
+            return true;
+          }),
+    [useStockBar, viewPath, features.expenses, features.workers]
+  );
+
+  useEffect(() => {
+    for (const { href } of navItems) {
+      router.prefetch(href);
+    }
+  }, [router, navItems]);
 
   const isActive = (href: string) =>
     useStockBar ? stockPathActive(pathname, href, viewPath) : pathname === href || (href !== "/" && pathname.startsWith(href));
 
+  const activeColor = useStockBar ? "#059669" : "#0B4A8C";
+  const activeBg = useStockBar ? "#ECFDF5" : "#EEF5FC";
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)]">
-      <div className="mx-auto flex max-w-md">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const active = isActive(href);
-          return (
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pointer-events-none"
+      aria-label="Main navigation"
+    >
+      <div className="ui-nav-dock pointer-events-auto mx-auto max-w-md">
+        <div className="flex">
+          {navItems.map(({ href, label, icon: Icon }) => {
+            const active = isActive(href);
+            return (
             <Link
               key={href}
               href={href}
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2.5 min-h-[60px] transition-colors touch-manipulation select-none ${
-                active
-                  ? useStockBar
-                    ? "text-emerald-600"
-                    : "text-[#0B4A8C]"
-                  : "text-zinc-500 active:text-zinc-700"
-              }`}
-            >
-              <Icon active={active} />
-              <span className="text-[10px] font-semibold leading-tight truncate max-w-full">
-                {label}
-              </span>
-            </Link>
-          );
-        })}
+              prefetch
+                aria-current={active ? "page" : undefined}
+                className="relative flex min-h-[58px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1.5 touch-manipulation select-none"
+              >
+                {active ? (
+                  <span
+                    className="absolute top-1.5 h-1 w-8 rounded-full"
+                    style={{ backgroundColor: activeColor }}
+                    aria-hidden
+                  />
+                ) : null}
+
+                <span
+                  className={`mt-1 flex h-8 w-10 items-center justify-center rounded-xl transition-all duration-200 ${
+                    active ? "scale-105" : ""
+                  }`}
+                  style={{
+                    backgroundColor: active ? activeBg : "transparent",
+                    color: active ? activeColor : "#94A3B8",
+                  }}
+                >
+                  <Icon active={active} />
+                </span>
+
+                <span
+                  className="max-w-full truncate text-[10px] leading-tight transition-colors duration-200"
+                  style={{
+                    color: active ? activeColor : "#94A3B8",
+                    fontWeight: active ? 700 : 500,
+                  }}
+                >
+                  {label}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );

@@ -4,15 +4,25 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { cachedApiJson, cacheKey, notifyLedgerDataChanged, readClientCache } from "@/lib/clientDataCache";
 import { APP_NAME } from "@/lib/brandAssets";
 import {
   buildTrackWhatsAppSummary,
+  formatSummaryCurrency,
   shareTrackSummaryOnWhatsApp,
   type TrackSummaryFilters,
+  type TrackSummaryStats,
 } from "@/lib/trackWhatsAppSummary";
 import { useConfig } from "../context/ConfigContext";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
+import { canUserModifyEntry } from "@/lib/paymentWorkflow";
+import EditEntrySheet, { EditIcon, LockIcon, TrashIcon } from "../components/EditEntrySheet";
+import ApproveOnSiteSheet from "../components/payments/ApproveOnSiteSheet";
+import { PaymentStatusBadge, PaymentStatusDetail } from "../components/payments/PaymentStatus";
+import SyncStatusBadge, { resolveSyncStatus } from "../components/SyncStatusBadge";
+import SheetsSyncBanner from "../components/SheetsSyncBanner";
+import { useUser } from "../context/UserContext";
 
 function formatDate(isoDate: string) {
   return formatDateDDMMYYYY(isoDate);
@@ -40,9 +50,10 @@ type Filters = {
   category: string;
   requestedBy: string;
   approvedBy: string;
-  method: string;
-  tag: string;
+  paidVia: string;
   search: string;
+  workflowStatus: string;
+  sheetsSync: string;
 };
 
 const EMPTY_FILTERS: Filters = {
@@ -51,9 +62,10 @@ const EMPTY_FILTERS: Filters = {
   category: "",
   requestedBy: "",
   approvedBy: "",
-  method: "",
-  tag: "",
+  paidVia: "",
   search: "",
+  workflowStatus: "",
+  sheetsSync: "",
 };
 
 function filtersToParams(activeFilters: Filters) {
@@ -63,9 +75,10 @@ function filtersToParams(activeFilters: Filters) {
   if (activeFilters.category) params.set("category", activeFilters.category);
   if (activeFilters.requestedBy) params.set("requestedBy", activeFilters.requestedBy);
   if (activeFilters.approvedBy) params.set("approvedBy", activeFilters.approvedBy);
-  if (activeFilters.method) params.set("method", activeFilters.method);
-  if (activeFilters.tag) params.set("tag", activeFilters.tag);
+  if (activeFilters.paidVia) params.set("paidVia", activeFilters.paidVia);
   if (activeFilters.search) params.set("search", activeFilters.search);
+  if (activeFilters.workflowStatus) params.set("workflowStatus", activeFilters.workflowStatus);
+  if (activeFilters.sheetsSync) params.set("sheetsSync", activeFilters.sheetsSync);
   return params;
 }
 
@@ -76,15 +89,17 @@ function toSummaryFilters(activeFilters: Filters): TrackSummaryFilters {
     requestedBy: activeFilters.requestedBy,
     category: activeFilters.category,
     approvedBy: activeFilters.approvedBy,
-    method: activeFilters.method,
-    tag: activeFilters.tag,
+    paidVia: activeFilters.paidVia,
     search: activeFilters.search,
+    workflowStatus: activeFilters.workflowStatus,
+    sheetsSync: activeFilters.sheetsSync,
   };
 }
 
 export default function TrackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { userName } = useUser();
   const { config } = useConfig() ?? {};
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,27 +112,30 @@ export default function TrackPage() {
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [requestedByOptions, setRequestedByOptions] = useState<string[]>([]);
   const [approvedByOptions, setApprovedByOptions] = useState<string[]>([]);
-  const [tagOptions, setTagOptions] = useState<string[]>([]);
 
   const urlFrom = searchParams.get("from") ?? "";
   const urlTo = searchParams.get("to") ?? "";
+  const urlWorkflow = searchParams.get("workflowStatus") ?? "";
+  const urlSheetsSync = searchParams.get("sheetsSync") ?? "";
   const [filters, setFilters] = useState<Filters>({
     ...EMPTY_FILTERS,
     from: urlFrom,
     to: urlTo,
+    workflowStatus: urlWorkflow,
+    sheetsSync: urlSheetsSync,
   });
   const [appliedFilters, setAppliedFilters] = useState<Filters>({
     ...EMPTY_FILTERS,
     from: urlFrom,
     to: urlTo,
+    workflowStatus: urlWorkflow,
+    sheetsSync: urlSheetsSync,
   });
   const [sharing, setSharing] = useState(false);
-
-  useEffect(() => {
-    if (urlFrom || urlTo) {
-      setFilters((f) => ({ ...f, from: urlFrom, to: urlTo }));
-    }
-  }, [urlFrom, urlTo]);
+  const [summaryStats, setSummaryStats] = useState<TrackSummaryStats | null>(null);
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+  const [approvingEntry, setApprovingEntry] = useState<Entry | null>(null);
+  const [bankOptions, setBankOptions] = useState<string[]>([]);
 
   const loadDefaults = useCallback(async () => {
     const res = await apiFetch("/api/defaults");
@@ -126,25 +144,41 @@ export default function TrackPage() {
     setCategoryOptions(data.expenseCategories ?? []);
     setRequestedByOptions(data.expenseNames ?? []);
     setApprovedByOptions(data.approverNames ?? []);
-    setTagOptions(data.expenseTags ?? []);
   }, []);
 
   const fetchEntries = useCallback(
     async (pageNum: number, activeFilters: Filters) => {
-      setLoading(true);
-      try {
-        const params = filtersToParams(activeFilters);
-        params.set("page", String(pageNum));
-        params.set("limit", "15");
+      const params = filtersToParams(activeFilters);
+      params.set("page", String(pageNum));
+      params.set("limit", "15");
+      const summaryParams = filtersToParams(activeFilters);
+      const entriesUrl = `/api/track/entries?${params}`;
+      const summaryUrl = `/api/track/summary?${summaryParams}`;
 
-        const res = await apiFetch(`/api/track/entries?${params}`);
-        if (res.ok) {
-          const data = await res.json();
+      const hasCache = readClientCache(cacheKey(entriesUrl)) !== null;
+      if (!hasCache) setLoading(true);
+
+      try {
+        const [entriesResult, summaryResult] = await Promise.all([
+          cachedApiJson<{
+            entries: Entry[];
+            hasMore: boolean;
+            total: number;
+            page: number;
+          }>(entriesUrl, 30_000),
+          cachedApiJson<TrackSummaryStats>(summaryUrl, 30_000),
+        ]);
+
+        if (entriesResult.data) {
+          const data = entriesResult.data;
           setEntries(data.entries);
           setHasMore(data.hasMore);
           setTotal(data.total);
           setPage(data.page);
           setAppliedFilters(activeFilters);
+        }
+        if (summaryResult.data) {
+          setSummaryStats(summaryResult.data);
         }
       } catch (err) {
         console.error("Failed to fetch entries:", err);
@@ -156,6 +190,21 @@ export default function TrackPage() {
   );
 
   useEffect(() => {
+    const next: Filters = {
+      ...EMPTY_FILTERS,
+      from: urlFrom,
+      to: urlTo,
+      workflowStatus: urlWorkflow,
+      sheetsSync: urlSheetsSync,
+    };
+    setFilters(next);
+    if (urlFrom || urlTo || urlWorkflow || urlSheetsSync) {
+      setShowFilters(true);
+    }
+    fetchEntries(1, next);
+  }, [urlFrom, urlTo, urlWorkflow, urlSheetsSync, fetchEntries]);
+
+  useEffect(() => {
     const features = config?.features ?? { expenses: false, workers: false, stock: false };
     const hasLedger = features.expenses || features.workers;
     if (config && !hasLedger) {
@@ -165,11 +214,34 @@ export default function TrackPage() {
 
   useEffect(() => {
     loadDefaults();
+    apiFetch("/api/defaults")
+      .then((r) => (r.ok ? r.json() : { banks: [] }))
+      .then((d) => setBankOptions(d.banks ?? []));
   }, [loadDefaults]);
 
-  useEffect(() => {
-    fetchEntries(1, filters);
-  }, [fetchEntries, filters.from, filters.to]);
+  async function handleDelete(entry: Entry) {
+    const reason = prompt("Reason for deletion (required):");
+    if (!reason?.trim()) return;
+    if (!confirm("Delete this entry?")) return;
+    try {
+      const res = await apiFetch(`/api/entries/${entry._id}/adjust`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim(), editedBy: userName || "User" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error ?? "Delete failed");
+        return;
+      }
+      setEntries((prev) => prev.filter((e) => e._id !== entry._id));
+      setTotal((t) => Math.max(0, t - 1));
+      setExpandedId(null);
+      notifyLedgerDataChanged();
+    } catch {
+      alert("Delete failed");
+    }
+  }
 
   function handleFilterChange(key: keyof Filters, value: string) {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -197,10 +269,14 @@ export default function TrackPage() {
     if (total === 0 || sharing) return;
     setSharing(true);
     try {
-      const params = filtersToParams(appliedFilters);
-      const res = await apiFetch(`/api/track/summary?${params}`);
-      if (!res.ok) throw new Error("Summary failed");
-      const stats = await res.json();
+      let stats = summaryStats;
+      if (!stats) {
+        const params = filtersToParams(appliedFilters);
+        const res = await apiFetch(`/api/track/summary?${params}`);
+        if (!res.ok) throw new Error("Summary failed");
+        stats = await res.json();
+        setSummaryStats(stats);
+      }
       const appName = config?.branding?.appName?.trim() || APP_NAME;
       const text = buildTrackWhatsAppSummary(appName, toSummaryFilters(appliedFilters), stats);
       shareTrackSummaryOnWhatsApp(text);
@@ -217,7 +293,7 @@ export default function TrackPage() {
   const hasActiveFilters = Object.entries(filters).some(([, v]) => v.trim() !== "");
 
   return (
-    <div className="min-h-screen bg-[#F4F8FC] pb-12">
+    <div className="min-h-screen bg-[var(--background)] pb-28">
       <div className="mx-auto max-w-md px-4 py-4">
         <header className="mb-4 flex items-center gap-3">
           <Link
@@ -242,6 +318,10 @@ export default function TrackPage() {
           </button>
         </header>
 
+        <div className="mb-4">
+          <SheetsSyncBanner onRefresh={() => fetchEntries(page, appliedFilters)} />
+        </div>
+
         <div className="mb-4 rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm">
           <FieldLabel>Search anything</FieldLabel>
           <div className="flex gap-2">
@@ -250,7 +330,7 @@ export default function TrackPage() {
               value={filters.search}
               onChange={(e) => handleFilterChange("search", e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && applyFilters()}
-              placeholder="Name, category, amount, note, tag, payment…"
+              placeholder="Name, category, amount, note, payment…"
               className={fieldClass()}
             />
             <button
@@ -262,7 +342,7 @@ export default function TrackPage() {
             </button>
           </div>
           <p className="mt-1.5 text-[10px] text-[#7A9BB8]">
-            Searches all fields: requested by, approved by, category, amount, notes, tags, payment type
+            Searches all fields: requested by, approved by, category, amount, notes
           </p>
         </div>
 
@@ -351,34 +431,48 @@ export default function TrackPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Payment type</FieldLabel>
-                <select
-                  value={filters.method}
-                  onChange={(e) => handleFilterChange("method", e.target.value)}
-                  className={fieldClass()}
-                >
-                  <option value="">All</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank">Bank A/c</option>
-                </select>
-              </div>
-              <div>
-                <FieldLabel>Tag</FieldLabel>
-                <select
-                  value={filters.tag}
-                  onChange={(e) => handleFilterChange("tag", e.target.value)}
-                  className={fieldClass()}
-                >
-                  <option value="">All tags</option>
-                  {tagOptions.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <FieldLabel>Sheets sync</FieldLabel>
+              <select
+                value={filters.sheetsSync}
+                onChange={(e) => handleFilterChange("sheetsSync", e.target.value)}
+                className={fieldClass()}
+              >
+                <option value="">All</option>
+                <option value="pending">Pending sync</option>
+                <option value="failed">Sync failed</option>
+              </select>
+            </div>
+
+            <div>
+              <FieldLabel>Paid via (admin)</FieldLabel>
+              <select
+                value={filters.paidVia}
+                onChange={(e) => handleFilterChange("paidVia", e.target.value)}
+                className={fieldClass()}
+              >
+                <option value="">All</option>
+                <option value="Cash">Cash</option>
+                <option value="GPay">GPay / UPI</option>
+                <option value="Bank">Bank transfer</option>
+              </select>
+              <p className="mt-1 text-[10px] text-[#7A9BB8]">
+                How admin paid — only shows verified/paid entries.
+              </p>
+            </div>
+
+            <div>
+              <FieldLabel>Approval / Payment status</FieldLabel>
+              <select
+                value={filters.workflowStatus}
+                onChange={(e) => handleFilterChange("workflowStatus", e.target.value)}
+                className={fieldClass()}
+              >
+                <option value="">All statuses</option>
+                <option value="approval_pending">📋 Pending Approval (needs Approved by)</option>
+                <option value="payment_pending">💳 Payment Pending (admin pays)</option>
+                <option value="paid">🟢 Paid / Verified (locked)</option>
+              </select>
             </div>
 
             <button
@@ -392,6 +486,45 @@ export default function TrackPage() {
         )}
 
         <section>
+          {summaryStats && total > 0 && (
+            <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 -mx-4 mb-4 bg-[var(--background)]/95 px-4 py-2 backdrop-blur-md">
+              <div className="ui-card overflow-hidden p-0 shadow-md ring-1 ring-[var(--border-soft)]">
+                <div className="bg-gradient-to-br from-[#0B4A8C] to-[#062f5c] px-4 py-3.5 text-white">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-white/65">
+                    Payment overview
+                  </p>
+                  <p className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight">
+                    {formatSummaryCurrency(summaryStats.totalAmount)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-white/55">
+                    {summaryStats.totalEntries} entr{summaryStats.totalEntries === 1 ? "y" : "ies"}{" "}
+                    in results
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 divide-x divide-slate-100 bg-white">
+                  <TrackSummaryStat
+                    label="Pending approval"
+                    amount={summaryStats.workflowTotals.pendingApproval.amount}
+                    count={summaryStats.workflowTotals.pendingApproval.count}
+                    tone="slate"
+                  />
+                  <TrackSummaryStat
+                    label="Payment pending"
+                    amount={summaryStats.workflowTotals.paymentPending.amount}
+                    count={summaryStats.workflowTotals.paymentPending.count}
+                    tone="gold"
+                  />
+                  <TrackSummaryStat
+                    label="Paid / verified"
+                    amount={summaryStats.workflowTotals.paidVerified.amount}
+                    count={summaryStats.workflowTotals.paidVerified.count}
+                    tone="brand"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-xs font-bold uppercase tracking-wider text-[#5A7FA5]">
               Results ({total})
@@ -443,6 +576,9 @@ export default function TrackPage() {
             <div className="space-y-2">
               {entries.map((entry) => {
                 const isExpanded = expandedId === entry._id;
+                const canModify = canUserModifyEntry(entry);
+                const needsOnSiteApproval =
+                  entry.type === "expense" && entry.approvalStatus === "pending";
                 return (
                   <div
                     key={entry._id}
@@ -466,11 +602,21 @@ export default function TrackPage() {
                           </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <p className="font-bold tabular-nums text-[#0B4A8C]">
-                          {formatAmount(entry.amount)}
-                        </p>
-                        <svg
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          <PaymentStatusBadge entry={entry} />
+                          <SyncStatusBadge status={resolveSyncStatus(entry)} compact />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold tabular-nums text-[#0B4A8C]">
+                            {formatAmount(entry.amount)}
+                          </p>
+                          {!canModify && (
+                            <span className="text-amber-700" aria-label="Entry locked" title="Locked">
+                              <LockIcon className="h-4 w-4" />
+                            </span>
+                          )}
+                          <svg
                           className={`h-4 w-4 text-[#7A9BB8] transition-transform ${isExpanded ? "rotate-180" : ""}`}
                           fill="none"
                           stroke="currentColor"
@@ -478,11 +624,45 @@ export default function TrackPage() {
                         >
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
+                        </div>
                       </div>
                     </button>
 
                     {isExpanded && (
                       <div className="border-t border-[#D6E6F5] bg-[#F8FBFE] px-4 py-3">
+                        {canModify && (
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(entry)}
+                              className="flex h-10 w-10 items-center justify-center rounded-lg text-red-600 hover:bg-red-50"
+                              aria-label="Delete"
+                            >
+                              <TrashIcon />
+                            </button>
+                            {needsOnSiteApproval ? (
+                              <button
+                                type="button"
+                                onClick={() => setApprovingEntry(entry)}
+                                className="flex items-center gap-1.5 rounded-xl bg-[#0B4A8C] px-4 py-2.5 text-sm font-semibold text-white shadow-sm active:scale-[0.98]"
+                              >
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Set approved by
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditingEntry(entry)}
+                                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-[#0B4A8C] hover:bg-[#E8F2FC]"
+                              >
+                                <EditIcon />
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <dl className="space-y-2 text-sm">
                           <Row label="Date" value={formatDate(entry.date)} />
                           {entry.category && <Row label="Category" value={entry.category} />}
@@ -491,9 +671,7 @@ export default function TrackPage() {
                           <Row label="Requested by" value={entry.name} />
                           {entry.approvedBy && <Row label="Approved by" value={entry.approvedBy} />}
                           {entry.note && <Row label="Notes" value={entry.note} />}
-                          {entry.tags?.length ? (
-                            <Row label="Tags" value={entry.tags.join(", ")} />
-                          ) : null}
+                          <PaymentStatusDetail entry={entry} />
                           {entry.attachmentUrl && (
                             <div className="flex justify-between gap-4">
                               <dt className="text-[#5A7FA5]">Attachment</dt>
@@ -518,7 +696,57 @@ export default function TrackPage() {
             </div>
           )}
         </section>
+
+        {approvingEntry && (
+          <ApproveOnSiteSheet
+            entry={approvingEntry}
+            onClose={() => setApprovingEntry(null)}
+            onSuccess={() => fetchEntries(page, appliedFilters)}
+            onEditDetails={() => {
+              setEditingEntry(approvingEntry);
+              setApprovingEntry(null);
+            }}
+          />
+        )}
+
+        {editingEntry && (
+          <EditEntrySheet
+            entry={editingEntry}
+            bankOptions={bankOptions}
+            hideApprovalField={editingEntry.approvalStatus === "pending"}
+            onClose={() => setEditingEntry(null)}
+            onSuccess={() => {
+              setEditingEntry(null);
+              fetchEntries(page, appliedFilters);
+            }}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function TrackSummaryStat({
+  label,
+  amount,
+  count,
+  tone,
+}: {
+  label: string;
+  amount: number;
+  count: number;
+  tone: "slate" | "gold" | "brand";
+}) {
+  const amountColor =
+    tone === "gold" ? "text-[#7A5E10]" : tone === "brand" ? "text-[var(--brand)]" : "text-slate-700";
+
+  return (
+    <div className="px-2 py-3 text-center">
+      <p className="text-[9px] font-semibold leading-tight text-[var(--text-faint)]">{label}</p>
+      <p className={`mt-1 text-sm font-bold tabular-nums ${amountColor}`}>
+        {formatSummaryCurrency(amount)}
+      </p>
+      <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">{count} entr{count === 1 ? "y" : "ies"}</p>
     </div>
   );
 }

@@ -1,18 +1,27 @@
 import type { Db } from "mongodb";
 import { mergeExpenseCategories, mergeExpenseTags } from "./entryCategories";
+import { sanitizeExpensePerson } from "./expensePeople";
 
 export async function ensureExpenseName(db: Db, businessId: string, name: string) {
   const trimmed = name.trim();
   if (!trimmed) return;
   const key = trimmed.toLowerCase();
   const doc = await db.collection("defaults").findOne({ businessId });
-  const existing = (doc?.expenseNames as string[] | undefined) ?? [];
-  if (existing.some((n) => n.trim().toLowerCase() === key)) return;
+  const existingPeople = (doc?.expensePeople as { nameLower?: string }[] | undefined) ?? [];
+  const existingNames = (doc?.expenseNames as string[] | undefined) ?? [];
+  if (
+    existingPeople.some((p) => p.nameLower === key) ||
+    existingNames.some((n) => n.trim().toLowerCase() === key)
+  ) {
+    return;
+  }
+  const person = sanitizeExpensePerson({ name: trimmed, preferredMethod: "cash", cashOk: true });
+  if (!person) return;
   await db.collection("defaults").updateOne(
     { businessId },
     {
       $set: { businessId },
-      $addToSet: { expenseNames: trimmed },
+      $addToSet: { expenseNames: trimmed, expensePeople: person },
     },
     { upsert: true }
   );

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import EntryList from "./components/EntryList";
 import SheetsSyncBanner from "./components/SheetsSyncBanner";
 import ExpenseEntryForm from "./components/salt/ExpenseEntryForm";
+import PaymentNotifications from "./components/payments/PaymentNotifications";
 import StickyOpeningBalance from "./components/salt/StickyOpeningBalance";
 import SaltWorksHeader from "./components/salt/SaltWorksHeader";
 import { useConfig } from "./context/ConfigContext";
@@ -29,7 +30,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F8FC] pb-24">
+    <div className="min-h-screen bg-[var(--background)] pb-28">
       <SaltWorksHeader />
 
       <StickyOpeningBalance refreshTrigger={refreshTrigger} />
@@ -40,20 +41,18 @@ export default function Home() {
           onRefresh={() => setRefreshTrigger((n) => n + 1)}
         />
 
-        <section>
-          <h2 className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-[#5A7FA5]">
-            Today Entry
-          </h2>
-          <ExpenseEntryForm
-            onSuccess={() => setRefreshTrigger((n) => n + 1)}
-            refreshTrigger={refreshTrigger}
-          />
-        </section>
+        <PaymentNotifications refreshTrigger={refreshTrigger} />
+
+        <ExpenseEntryForm
+          onSuccess={() => setRefreshTrigger((n) => n + 1)}
+          refreshTrigger={refreshTrigger}
+        />
 
         <section>
-          <h2 className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-[#5A7FA5]">
-            Today
-          </h2>
+          <div className="mb-3 flex items-center justify-between px-0.5">
+            <h2 className="ui-section-title">Recent entries</h2>
+            <span className="text-xs font-medium text-[var(--text-faint)]">Today</span>
+          </div>
           <EntryList
             refreshTrigger={refreshTrigger}
             limit={10}

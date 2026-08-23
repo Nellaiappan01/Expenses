@@ -9,14 +9,12 @@ import {
   ensureExpenseTag,
 } from "@/lib/expenseDefaultsHelpers";
 import {
-  appendEntryToGoogleSheets,
   buildSheetsPayload,
-  markEntrySyncStatus,
+  scheduleSheetsAppend,
   type SheetsWebhookPayload,
 } from "@/lib/googleSheetsSync";
 import { invalidateBalanceCache } from "@/lib/balance";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
-import { getSheetsWebhookUrl } from "@/lib/userSettings";
 import type { Entry, EntryInput } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
@@ -32,9 +30,11 @@ export async function POST(request: NextRequest) {
       sender,
       category,
       approvedBy,
+      paymentDueDate,
       attachmentUrl,
       attachmentPublicId,
       tags,
+      excludeFromProfitability,
       type = "expense",
     } = body;
 
@@ -53,9 +53,6 @@ export async function POST(request: NextRequest) {
     if ((type === "worker_payment" || type === "expense") && !category?.trim()) {
       return NextResponse.json({ error: "Category is required" }, { status: 400 });
     }
-    if (type === "expense" && !approvedBy?.trim()) {
-      return NextResponse.json({ error: "Approved by is required" }, { status: 400 });
-    }
 
     const userId = await getUserId(request);
     const db = await getDb();
@@ -67,11 +64,14 @@ export async function POST(request: NextRequest) {
       ]);
     }
 
+    if (type === "expense" && approvedBy?.trim()) {
+      await ensureApproverName(db, userId, approvedBy.trim());
+    }
+
     if (type === "expense") {
       const tagList = Array.isArray(tags) ? tags.filter((t) => t?.trim()) : [];
       await Promise.all([
         ensureExpenseName(db, userId, name),
-        ensureApproverName(db, userId, approvedBy!.trim()),
         ensureExpenseCategory(db, userId, category!.trim()),
         ...tagList.map((tag) => ensureExpenseTag(db, userId, tag)),
       ]);
@@ -81,6 +81,17 @@ export async function POST(request: NextRequest) {
     const normalizedTags = Array.isArray(tags)
       ? tags.map((t) => t.trim()).filter(Boolean)
       : undefined;
+
+    const isExpenseWorkflow = type === "expense";
+    const trimmedApproved = approvedBy?.trim();
+    const trimmedPaymentDue = paymentDueDate?.trim();
+
+    if (isExpenseWorkflow && trimmedApproved && !trimmedPaymentDue) {
+      return NextResponse.json(
+        { error: "Payment date is required when Approved by is set" },
+        { status: 400 }
+      );
+    }
 
     const entry: Omit<Entry, "_id"> = {
       type,
@@ -93,11 +104,23 @@ export async function POST(request: NextRequest) {
       note: note?.trim() || undefined,
       bankName: bankName?.trim() || undefined,
       sender: sender?.trim() || undefined,
-      approvedBy: approvedBy?.trim() || undefined,
-      approvedByLower: approvedBy?.trim().toLowerCase(),
+      approvedBy: trimmedApproved || undefined,
+      approvedByLower: trimmedApproved?.toLowerCase(),
+      ...(isExpenseWorkflow
+        ? {
+            approvalStatus: trimmedApproved ? ("approved" as const) : ("pending" as const),
+            paymentStatus: "pending" as const,
+            ...(trimmedApproved
+              ? { approvedAt: createdAt, paymentDueDate: trimmedPaymentDue }
+              : {}),
+          }
+        : {}),
       attachmentUrl: attachmentUrl?.trim() || undefined,
       attachmentPublicId: attachmentPublicId?.trim() || undefined,
       tags: normalizedTags?.length ? normalizedTags : undefined,
+      ...(isExpenseWorkflow && excludeFromProfitability
+        ? { excludeFromProfitability: true }
+        : {}),
       businessId: userId,
       createdAt,
       sheetsSyncStatus: "pending",
@@ -121,48 +144,21 @@ export async function POST(request: NextRequest) {
         note: entry.note ?? "",
         bankName: entry.bankName,
         approvedBy: entry.approvedBy ?? "",
+        approvalStatus: entry.approvalStatus,
+        paymentStatus: entry.paymentStatus,
       }),
     };
 
-    const sheetsResult = await appendEntryToGoogleSheets(
-      payload,
-      (await getSheetsWebhookUrl(db, userId)) ?? ""
-    );
-
-    if (sheetsResult.ok) {
-      await markEntrySyncStatus(db, entryId, userId, "synced");
-      console.info(`[Entries] entry ${entryId}: synced`);
-
-      return NextResponse.json(
-        {
-          ...entry,
-          _id: entryId,
-          createdAt: createdAt.toISOString(),
-          sheetsSyncStatus: "synced" as const,
-        },
-        { status: 201 }
-      );
-    }
-
-    await markEntrySyncStatus(db, entryId, userId, "failed", sheetsResult.error);
-    console.error(
-      `[Entries] entry ${entryId}: sheets sync failed —`,
-      sheetsResult.error
-    );
+    scheduleSheetsAppend(db, userId, entryId, payload);
 
     return NextResponse.json(
       {
-        error: "Google Sheets sync failed. Entry needs attention.",
-        entryId,
-        sheetsSyncStatus: "failed" as const,
-        sheetsSyncError: sheetsResult.error,
-        entry: {
-          ...entry,
-          _id: entryId,
-          createdAt: createdAt.toISOString(),
-        },
+        ...entry,
+        _id: entryId,
+        createdAt: createdAt.toISOString(),
+        sheetsSyncStatus: "pending" as const,
       },
-      { status: 502 }
+      { status: 201 }
     );
   } catch (error) {
     console.error("[Entries] database save error:", error);

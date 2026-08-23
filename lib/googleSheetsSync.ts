@@ -1,7 +1,9 @@
+import { after } from "next/server";
 import { ObjectId, type Db } from "mongodb";
 import { formatIsoDateForSheet } from "./dateFormat";
+import { formatSheetPaymentStatus } from "./paymentWorkflow";
 import { getSheetsWebhookUrl } from "./userSettings";
-import type { EntryType, SheetsSyncStatus } from "./types";
+import type { ApprovalStatus, EntryType, PaymentStatus, SheetsSyncStatus } from "./types";
 
 export type SheetsMatchFingerprint = {
   date: string;
@@ -25,6 +27,8 @@ export type SheetsWebhookPayload = {
   source: string;
   requestedBy: string;
   approvedBy: string;
+  /** Column K — payment workflow status (Pending Approval / Payment Pending / Paid / Verified). */
+  paymentStatus?: string;
   /** Filled when an entry is edited via Adjust (column L in the sheet). */
   adjustReason?: string;
 };
@@ -37,6 +41,9 @@ export type SheetsSyncResult = {
   responseBody?: string;
 };
 
+/** Max wait for Apps Script webhook — avoids hanging requests indefinitely. */
+const SHEETS_FETCH_TIMEOUT_MS = 12_000;
+
 export function buildSheetsPayload(row: {
   type: EntryType;
   date: string;
@@ -47,6 +54,8 @@ export function buildSheetsPayload(row: {
   note?: string;
   bankName?: string;
   approvedBy?: string;
+  approvalStatus?: ApprovalStatus;
+  paymentStatus?: PaymentStatus;
 }): SheetsWebhookPayload {
   const absAmount = Math.abs(Number(row.amount) || 0);
   let category = row.category?.trim() ?? "";
@@ -93,6 +102,11 @@ export function buildSheetsPayload(row: {
     source,
     requestedBy,
     approvedBy,
+    paymentStatus: formatSheetPaymentStatus({
+      type: row.type,
+      approvalStatus: row.approvalStatus,
+      paymentStatus: row.paymentStatus,
+    }),
   };
 }
 
@@ -106,6 +120,8 @@ export function buildSheetsMatch(row: {
   note?: string;
   bankName?: string;
   approvedBy?: string;
+  approvalStatus?: ApprovalStatus;
+  paymentStatus?: PaymentStatus;
 }): SheetsMatchFingerprint {
   const payload = buildSheetsPayload(row);
   return {
@@ -128,6 +144,8 @@ function entryDocToSheetsRow(entry: Record<string, unknown>) {
     note: (entry.note as string) ?? "",
     bankName: entry.bankName as string | undefined,
     approvedBy: (entry.approvedBy as string) ?? "",
+    approvalStatus: entry.approvalStatus as ApprovalStatus | undefined,
+    paymentStatus: entry.paymentStatus as PaymentStatus | undefined,
   };
 }
 
@@ -149,6 +167,7 @@ export async function appendEntryToGoogleSheets(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(SHEETS_FETCH_TIMEOUT_MS),
     });
 
     const responseBody = await res.text().catch(() => "");
@@ -274,10 +293,83 @@ export async function syncEntryAdjustment(
   return result;
 }
 
+async function runSheetsAppend(
+  db: Db,
+  businessId: string,
+  entryId: string,
+  payload: SheetsWebhookPayload
+) {
+  try {
+    const webhookUrl = (await getSheetsWebhookUrl(db, businessId)) ?? "";
+    const result = await appendEntryToGoogleSheets(payload, webhookUrl);
+    if (result.ok) {
+      await markEntrySyncStatus(db, entryId, businessId, "synced");
+      console.info(`[Google Sheets] background append ok: ${entryId}`);
+    } else {
+      await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
+      console.error(`[Google Sheets] background append failed: ${entryId}`, result.error);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "sync_failed";
+    console.error(`[Google Sheets] background append error: ${entryId}`, message);
+    await markEntrySyncStatus(db, entryId, businessId, "failed", message).catch(() => {});
+  }
+}
+
+/** Save to DB first, sync sheet row after the HTTP response is sent. */
+export function scheduleSheetsAppend(
+  db: Db,
+  businessId: string,
+  entryId: string,
+  payload: SheetsWebhookPayload
+) {
+  after(() => runSheetsAppend(db, businessId, entryId, payload));
+}
+
+/** Update/delete sheet row after the HTTP response is sent. */
+export function scheduleSheetsAdjustment(
+  db: Db,
+  businessId: string,
+  entryId: string,
+  action: "update" | "delete",
+  entryDoc: Record<string, unknown>,
+  originalEntry?: Record<string, unknown>,
+  adjustReason?: string
+) {
+  after(() =>
+    syncEntryAdjustment(
+      db,
+      businessId,
+      entryId,
+      action,
+      entryDoc,
+      originalEntry,
+      adjustReason
+    ).catch((error) => {
+      const message = error instanceof Error ? error.message : "sync_failed";
+      console.error(`[Google Sheets] background ${action} error: ${entryId}`, message);
+    })
+  );
+}
+
 export async function retryAllFailedSyncs(db: Db, businessId: string) {
+  return retryAllSheetsSyncs(db, businessId, ["failed"]);
+}
+
+/** Retry entries that are pending or failed to sync to Google Sheets. */
+export async function retryAllSheetsSyncs(
+  db: Db,
+  businessId: string,
+  statuses: SheetsSyncStatus[] = ["pending", "failed"]
+) {
   const failed = await db
     .collection("entries")
-    .find({ businessId, sheetsSyncStatus: "failed" })
+    .find({
+      businessId,
+      deleted: { $ne: true },
+      sheetsSyncStatus: { $in: statuses },
+      $nor: [SHEETS_SYNC_DEFERRED_NOR],
+    })
     .sort({ createdAt: 1 })
     .toArray();
 
@@ -292,10 +384,34 @@ export async function retryAllFailedSyncs(db: Db, businessId: string) {
   return results;
 }
 
+/** Workflow expenses sync only after payment verify — not a sheets queue item yet. */
+export const SHEETS_SYNC_DEFERRED_NOR = {
+  type: "expense",
+  paymentStatus: "pending",
+  sheetsSyncedAt: { $exists: false },
+} as const;
+
+export function buildSheetsSyncQueueFilter(
+  businessId: string,
+  status?: "pending" | "failed"
+): Record<string, unknown> {
+  return {
+    businessId,
+    deleted: { $ne: true },
+    sheetsSyncStatus: status ?? { $in: ["pending", "failed"] },
+    $nor: [SHEETS_SYNC_DEFERRED_NOR],
+  };
+}
+
 export async function getSheetsSyncCounts(db: Db, businessId: string) {
+  const base = {
+    businessId,
+    deleted: { $ne: true },
+    $nor: [SHEETS_SYNC_DEFERRED_NOR],
+  };
   const [pending, failed] = await Promise.all([
-    db.collection("entries").countDocuments({ businessId, sheetsSyncStatus: "pending" }),
-    db.collection("entries").countDocuments({ businessId, sheetsSyncStatus: "failed" }),
+    db.collection("entries").countDocuments({ ...base, sheetsSyncStatus: "pending" }),
+    db.collection("entries").countDocuments({ ...base, sheetsSyncStatus: "failed" }),
   ]);
   return { pending, failed, total: pending + failed };
 }

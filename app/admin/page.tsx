@@ -3,15 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
+import type { EntryType } from "@/lib/types";
 import { useUser } from "../context/UserContext";
+import AdminShell from "../components/admin/AdminShell";
 
 type AdminUser = { userId: string; name?: string; username?: string; isAdmin?: boolean };
 
-type UserFeatures = { expenses: boolean; workers: boolean; stock: boolean };
+type UserFeatures = { expenses: boolean; workers: boolean; stock: boolean; profitability: boolean };
 
 type Entry = {
   _id: string;
-  type: string;
+  type: EntryType;
   name: string;
   amount: number;
   method: string;
@@ -21,7 +24,7 @@ type Entry = {
 };
 
 export default function AdminPage() {
-  const { userId, isAdmin } = useUser();
+  const { userId } = useUser();
   const [config, setConfig] = useState<{
     appMode: string;
     features: { expenses: boolean; workers: boolean; stock: boolean; user_delete?: boolean };
@@ -29,7 +32,12 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [selectedUserForFeatures, setSelectedUserForFeatures] = useState("");
-  const [userFeatures, setUserFeatures] = useState<UserFeatures>({ expenses: true, workers: true, stock: false });
+  const [userFeatures, setUserFeatures] = useState<UserFeatures>({
+    expenses: true,
+    workers: true,
+    stock: false,
+    profitability: false,
+  });
   const [userFeaturesSaving, setUserFeaturesSaving] = useState(false);
   const [userFeaturesStatus, setUserFeaturesStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [resetUsername, setResetUsername] = useState("");
@@ -37,6 +45,11 @@ export default function AdminPage() {
   const [resetStatus, setResetStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [deleteUserId, setDeleteUserId] = useState("");
   const [deleteStatus, setDeleteStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [editUserId, setEditUserId] = useState("");
+  const [editUserName, setEditUserName] = useState("");
+  const [editUserUsername, setEditUserUsername] = useState("");
+  const [editUserStatus, setEditUserStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [editUserSaving, setEditUserSaving] = useState(false);
   const [viewUserDashboard, setViewUserDashboard] = useState("");
   const [dashboardFrom, setDashboardFrom] = useState("");
   const [dashboardTo, setDashboardTo] = useState("");
@@ -44,9 +57,11 @@ export default function AdminPage() {
     received: number;
     paid: number;
     net: number;
+    closingBalance: number;
     expense: number;
     workerPayment: number;
-    rotationCash: number;
+    walletIn: number;
+    walletOut: number;
     adjustment: number;
   } | null>(null);
   const [dashboardEntries, setDashboardEntries] = useState<Entry[]>([]);
@@ -70,9 +85,31 @@ export default function AdminPage() {
     if (!selectedUserForFeatures.trim()) return;
     apiFetch(`/api/admin/users/${encodeURIComponent(selectedUserForFeatures)}/config`)
       .then((r) => (r.ok ? r.json() : { features: { expenses: true, workers: true, stock: false } }))
-      .then((d) => setUserFeatures(d.features ?? { expenses: true, workers: true, stock: false }))
-      .catch(() => setUserFeatures({ expenses: true, workers: true, stock: false }));
+      .then((d) =>
+        setUserFeatures({
+          expenses: d.features?.expenses ?? true,
+          workers: d.features?.workers ?? true,
+          stock: d.features?.stock ?? false,
+          profitability: d.features?.profitability ?? false,
+        })
+      )
+      .catch(() =>
+        setUserFeatures({ expenses: true, workers: true, stock: false, profitability: false })
+      );
   }, [selectedUserForFeatures]);
+
+  useEffect(() => {
+    if (!editUserId.trim()) {
+      setEditUserName("");
+      setEditUserUsername("");
+      return;
+    }
+    const user = users.find((u) => u.userId === editUserId);
+    if (user) {
+      setEditUserName(user.name || "");
+      setEditUserUsername(user.username || user.userId || "");
+    }
+  }, [editUserId, users]);
 
   useEffect(() => {
     if (!viewUserDashboard.trim()) {
@@ -165,6 +202,39 @@ export default function AdminPage() {
     }
   }
 
+  async function handleEditUser() {
+    if (!editUserId.trim()) return;
+    setEditUserStatus(null);
+    setEditUserSaving(true);
+    try {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(editUserId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editUserName.trim(),
+          username: editUserUsername.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update user");
+      setEditUserStatus({ ok: true, msg: "User updated." });
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.userId === editUserId
+            ? { ...u, name: data.name, username: data.username }
+            : u
+        )
+      );
+    } catch (err) {
+      setEditUserStatus({
+        ok: false,
+        msg: err instanceof Error ? err.message : "Failed to update user.",
+      });
+    } finally {
+      setEditUserSaving(false);
+    }
+  }
+
   async function handleDeleteUser() {
     if (!deleteUserId.trim()) return;
     setDeleteStatus(null);
@@ -186,56 +256,28 @@ export default function AdminPage() {
     }
   }
 
-  if (!isAdmin) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-100 px-4 dark:bg-zinc-950">
-        <div className="text-center">
-          <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
-            Access Denied
-          </h1>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            Admin access required.
-          </p>
-          <Link
-            href="/"
-            className="mt-4 inline-block text-sm font-medium text-emerald-600 dark:text-emerald-400"
-          >
-            ← Back to Home
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">
-      <div className="mx-auto max-w-md px-4 py-6 pb-24 sm:px-5">
-        <header className="mb-6 flex items-center gap-3">
-          <Link
-            href="/"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-            aria-label="Back"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-          </Link>
-          <div>
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
-              Admin
-            </h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Configure app features
-            </p>
-          </div>
-        </header>
-
+    <AdminShell active="settings" title="Admin Settings" subtitle="Users, features & accounts">
         {!config ? (
           <div className="flex justify-center py-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0B4A8C] border-t-transparent" />
           </div>
         ) : (
           <div className="space-y-6">
+            <Link
+              href="/admin/payments"
+              className="flex items-center justify-between rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm transition-colors hover:border-[#0B4A8C] hover:bg-[#F8FBFE]"
+            >
+              <div>
+                <p className="font-semibold text-[#0B4A8C]">Payment Management</p>
+                <p className="mt-0.5 text-xs text-[#5A7FA5]">
+                  Approve requests · Transfer &amp; verify payments
+                </p>
+              </div>
+              <svg className="h-5 w-5 shrink-0 text-[#0B4A8C]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
               <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                 Set User Features
@@ -269,13 +311,23 @@ export default function AdminPage() {
                         { key: "expenses" as const, label: "Expenses" },
                         { key: "workers" as const, label: "Workers" },
                         { key: "stock" as const, label: "Stock" },
-                      ].map(({ key, label }) => (
+                        {
+                          key: "profitability" as const,
+                          label: "Profitability",
+                          hint: "Revenue vs expense profit page in menu",
+                        },
+                      ].map(({ key, label, hint }) => (
                         <label
                           key={key}
                           className="flex cursor-pointer items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700"
                         >
-                          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                            {label}
+                          <span>
+                            <span className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                              {label}
+                            </span>
+                            {hint ? (
+                              <span className="mt-0.5 block text-[10px] text-zinc-500">{hint}</span>
+                            ) : null}
                           </span>
                           <input
                             type="checkbox"
@@ -362,6 +414,29 @@ export default function AdminPage() {
                       </div>
                     ) : dashboardData ? (
                       <div className="space-y-3">
+                        <div className="rounded-lg border border-[#D6E6F5] bg-[#EEF5FC] p-3">
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-[#5A7FA5]">
+                            Closing balance (all time)
+                          </p>
+                          <p
+                            className={`text-lg font-bold tabular-nums ${
+                              dashboardData.closingBalance >= 0
+                                ? "text-[#0B4A8C]"
+                                : "text-red-600"
+                            }`}
+                          >
+                            ₹
+                            {dashboardData.closingBalance.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </p>
+                          <p className="mt-1 text-[10px] text-[#5A7FA5]">
+                            Same as opening balance on the user&apos;s home screen.
+                          </p>
+                        </div>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                          Selected date range
+                        </p>
                         <div className="grid grid-cols-3 gap-2">
                           <div className="rounded-lg bg-emerald-50 p-2 dark:bg-emerald-950/30">
                             <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">Received</p>
@@ -376,7 +451,7 @@ export default function AdminPage() {
                             </p>
                           </div>
                           <div className="rounded-lg bg-zinc-100 p-2 dark:bg-zinc-800">
-                            <p className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400">Net</p>
+                            <p className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400">Period net</p>
                             <p className={`text-sm font-semibold ${dashboardData.net >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
                               ₹{dashboardData.net.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                             </p>
@@ -396,8 +471,8 @@ export default function AdminPage() {
                                       ({e.type === "expense" ? "Exp" : e.type === "worker_payment" ? "Worker" : e.type === "rotation_cash" ? "Wallet" : "Adj"})
                                     </span>
                                   </span>
-                                  <span className={`shrink-0 font-medium ${e.amount >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                    {e.amount >= 0 ? "+" : ""}₹{e.amount.toLocaleString("en-IN")}
+                                  <span className={`shrink-0 font-medium tabular-nums ${entryAmountColorClass(e)}`}>
+                                    {formatEntryAmount(e.amount, e.type)}
                                   </span>
                                 </div>
                               ))
@@ -435,6 +510,74 @@ export default function AdminPage() {
                     className="h-4 w-4 rounded"
                   />
                 </label>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                Edit User
+              </h2>
+              <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+                Update display name or login username.
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                    User
+                  </label>
+                  <select
+                    value={editUserId}
+                    onChange={(e) => setEditUserId(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  >
+                    <option value="">Select user…</option>
+                    {users.map((u) => (
+                      <option key={u.userId} value={u.userId}>
+                        {u.name || u.username || u.userId}
+                        {u.isAdmin ? " (admin)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {editUserId && (
+                  <>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                        Display name
+                      </label>
+                      <input
+                        value={editUserName}
+                        onChange={(e) => setEditUserName(e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                        Username (login)
+                      </label>
+                      <input
+                        value={editUserUsername}
+                        onChange={(e) => setEditUserUsername(e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                      />
+                    </div>
+                    {editUserStatus && (
+                      <p
+                        className={`text-sm ${editUserStatus.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                      >
+                        {editUserStatus.msg}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleEditUser}
+                      disabled={editUserSaving || !editUserName.trim() || !editUserUsername.trim()}
+                      className="w-full rounded-lg bg-[#0B4A8C] py-2 text-sm font-medium text-white hover:bg-[#083A6E] disabled:opacity-50"
+                    >
+                      {editUserSaving ? "Saving…" : "Save User"}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -548,7 +691,6 @@ export default function AdminPage() {
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </AdminShell>
   );
 }

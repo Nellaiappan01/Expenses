@@ -6,6 +6,7 @@ const DEFAULT_FEATURES = {
   expenses: true,
   workers: true,
   stock: false,
+  profitability: false,
 };
 
 export async function GET(
@@ -62,6 +63,10 @@ export async function PATCH(
       expenses: typeof features.expenses === "boolean" ? features.expenses : current.features?.expenses ?? true,
       workers: typeof features.workers === "boolean" ? features.workers : current.features?.workers ?? true,
       stock: typeof features.stock === "boolean" ? features.stock : current.features?.stock ?? false,
+      profitability:
+        typeof features.profitability === "boolean"
+          ? features.profitability
+          : current.features?.profitability ?? false,
     };
 
     const newConfig = {

@@ -1,4 +1,5 @@
 import type { Entry } from "./types";
+import { isLegacyWorkflowEntry } from "./paymentWorkflow";
 
 export type TrackSummaryFilters = {
   from: string;
@@ -6,10 +7,35 @@ export type TrackSummaryFilters = {
   requestedBy: string;
   category: string;
   approvedBy: string;
-  method: string;
-  tag: string;
+  paidVia: string;
   search: string;
+  workflowStatus: string;
+  sheetsSync: string;
 };
+
+function sheetsSyncLabel(value: string): string {
+  switch (value.trim()) {
+    case "pending":
+      return "Pending sync";
+    case "failed":
+      return "Sync failed";
+    default:
+      return value.trim();
+  }
+}
+
+function workflowStatusLabel(value: string): string {
+  switch (value.trim()) {
+    case "approval_pending":
+      return "Pending Approval";
+    case "payment_pending":
+      return "Payment Pending";
+    case "paid":
+      return "Paid / Verified";
+    default:
+      return value.trim();
+  }
+}
 
 export type AmountBreakdownRow = {
   label: string;
@@ -19,15 +45,30 @@ export type AmountBreakdownRow = {
 
 export type PaymentLine = {
   date: string;
+  requestedBy: string;
   category: string;
   amount: number;
+  note?: string;
+};
+
+export type WorkflowBucketTotals = {
+  amount: number;
+  count: number;
+};
+
+export type WorkflowTotals = {
+  pendingApproval: WorkflowBucketTotals;
+  paymentPending: WorkflowBucketTotals;
+  paidVerified: WorkflowBucketTotals;
 };
 
 export type TrackSummaryStats = {
   totalAmount: number;
   totalEntries: number;
   categoryBreakdown: AmountBreakdownRow[];
+  requestedByBreakdown: AmountBreakdownRow[];
   payments: PaymentLine[];
+  workflowTotals: WorkflowTotals;
 };
 
 const MONTH_SHORT = [
@@ -123,6 +164,80 @@ function groupCategories(entries: Entry[]): AmountBreakdownRow[] {
     .sort((a, b) => b.amount - a.amount || a.label.localeCompare(b.label));
 }
 
+type WorkflowBucket = "pending_approval" | "payment_pending" | "paid";
+
+function expenseWorkflowBucket(entry: Entry): WorkflowBucket | null {
+  if (entry.type !== "expense") return null;
+  if (entry.approvalStatus === "rejected") return null;
+  if (isLegacyWorkflowEntry(entry)) return "paid";
+  if (entry.approvalStatus === "pending") return "pending_approval";
+  if (entry.paymentStatus === "paid") return "paid";
+  if (entry.approvalStatus === "approved") return "payment_pending";
+  return "paid";
+}
+
+function buildWorkflowTotals(entries: Entry[]): WorkflowTotals {
+  const totals: WorkflowTotals = {
+    pendingApproval: { amount: 0, count: 0 },
+    paymentPending: { amount: 0, count: 0 },
+    paidVerified: { amount: 0, count: 0 },
+  };
+
+  for (const entry of entries) {
+    const bucket = expenseWorkflowBucket(entry);
+    if (!bucket) continue;
+    const amount = Math.abs(entry.amount);
+    if (bucket === "pending_approval") {
+      totals.pendingApproval.amount += amount;
+      totals.pendingApproval.count += 1;
+    } else if (bucket === "payment_pending") {
+      totals.paymentPending.amount += amount;
+      totals.paymentPending.count += 1;
+    } else {
+      totals.paidVerified.amount += amount;
+      totals.paidVerified.count += 1;
+    }
+  }
+
+  return totals;
+}
+
+/** Merge requested-by names case-insensitively. */
+function groupRequestedBy(entries: Entry[]): AmountBreakdownRow[] {
+  const map = new Map<
+    string,
+    { label: string; labelVotes: Map<string, number>; amount: number; count: number }
+  >();
+
+  for (const entry of entries) {
+    const raw = entry.name?.trim() || "Unknown";
+    const key = raw.toLowerCase();
+    const amount = Math.abs(entry.amount);
+
+    let row = map.get(key);
+    if (!row) {
+      row = { label: raw, labelVotes: new Map(), amount: 0, count: 0 };
+      map.set(key, row);
+    }
+
+    row.amount += amount;
+    row.count += 1;
+    row.labelVotes.set(raw, (row.labelVotes.get(raw) ?? 0) + 1);
+
+    const topLabel = [...row.labelVotes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (topLabel) row.label = topLabel;
+  }
+
+  return [...map.values()]
+    .map(({ label, amount, count }) => ({ label, amount, count }))
+    .sort((a, b) => b.amount - a.amount || a.label.localeCompare(b.label));
+}
+
+function workflowLine(label: string, row: WorkflowBucketTotals): string {
+  const countSuffix = row.count > 0 ? ` (${row.count})` : "";
+  return `- ${label}: ${formatSummaryCurrency(row.amount)}${countSuffix}`;
+}
+
 export function buildTrackSummaryStats(entries: Entry[]): TrackSummaryStats {
   const sorted = sortEntriesChronologically(entries);
   const totalAmount = sorted.reduce((sum, e) => sum + Math.abs(e.amount), 0);
@@ -131,11 +246,15 @@ export function buildTrackSummaryStats(entries: Entry[]): TrackSummaryStats {
     totalAmount,
     totalEntries: sorted.length,
     categoryBreakdown: groupCategories(sorted),
+    requestedByBreakdown: groupRequestedBy(sorted),
     payments: sorted.map((e) => ({
       date: formatPaymentDate(e.date),
+      requestedBy: e.name?.trim() || "Unknown",
       category: e.category?.trim() || "Other",
       amount: Math.abs(e.amount),
+      note: e.note?.trim() || undefined,
     })),
+    workflowTotals: buildWorkflowTotals(sorted),
   };
 }
 
@@ -146,8 +265,10 @@ export function buildTrackWhatsAppSummary(
 ): string {
   const lines: string[] = [];
   const brand = appName.trim() || "Site Ledger";
+  const divider = "────────────────";
 
   lines.push(`*${brand} – Payment Summary*`);
+  lines.push(divider);
   lines.push("");
 
   if (filters.requestedBy.trim()) {
@@ -159,14 +280,22 @@ export function buildTrackWhatsAppSummary(
   if (filters.approvedBy.trim()) {
     lines.push(`*Approved By:* ${filters.approvedBy.trim()}`);
   }
-  if (filters.method.trim()) {
-    lines.push(`*Payment Type:* ${paymentTypeLabel(filters.method.trim())}`);
-  }
-  if (filters.tag.trim()) {
-    lines.push(`*Tag:* ${filters.tag.trim()}`);
+  if (filters.paidVia.trim()) {
+    const labels: Record<string, string> = {
+      Cash: "Cash",
+      GPay: "GPay / UPI",
+      Bank: "Bank transfer",
+    };
+    lines.push(`*Paid via:* ${labels[filters.paidVia.trim()] ?? filters.paidVia.trim()}`);
   }
   if (filters.search.trim()) {
     lines.push(`*Search:* ${filters.search.trim()}`);
+  }
+  if (filters.workflowStatus.trim()) {
+    lines.push(`*Status filter:* ${workflowStatusLabel(filters.workflowStatus)}`);
+  }
+  if (filters.sheetsSync.trim()) {
+    lines.push(`*Sheets sync:* ${sheetsSyncLabel(filters.sheetsSync)}`);
   }
 
   const period = formatSummaryPeriod(filters.from, filters.to);
@@ -174,15 +303,35 @@ export function buildTrackWhatsAppSummary(
     lines.push(`*Period:* ${period}`);
   }
 
+  const { workflowTotals } = stats;
+
   lines.push("");
-  lines.push(`*Total Amount:* ${formatSummaryCurrency(stats.totalAmount)}`);
+  lines.push("*Overview*");
+  lines.push(`- Total Amount: ${formatSummaryCurrency(stats.totalAmount)}`);
+  lines.push(workflowLine("Pending Approval", workflowTotals.pendingApproval));
+  lines.push(workflowLine("Payment Pending", workflowTotals.paymentPending));
+  lines.push(workflowLine("Paid / Verified", workflowTotals.paidVerified));
+
+  const showRequestedBySummary =
+    !filters.requestedBy.trim() && stats.requestedByBreakdown.length > 0;
+
+  if (showRequestedBySummary) {
+    lines.push("");
+    lines.push("*Requested By Summary*");
+    for (const row of stats.requestedByBreakdown) {
+      const countSuffix = row.count > 1 ? ` (${row.count})` : "";
+      lines.push(`- ${row.label}: ${formatSummaryCurrency(row.amount)}${countSuffix}`);
+    }
+  }
 
   if (stats.payments.length > 0) {
     lines.push("");
-    lines.push("*Payments:*");
+    lines.push(divider);
+    lines.push("*Payments*");
     for (const payment of stats.payments) {
+      const noteSuffix = payment.note ? ` - ${payment.note}` : "";
       lines.push(
-        `${payment.date} - ${payment.category} - ${formatSummaryCurrency(payment.amount)}`
+        `- ${payment.date} | ${payment.requestedBy} | ${payment.category} | ${formatSummaryCurrency(payment.amount)}${noteSuffix}`
       );
     }
   }
@@ -194,14 +343,13 @@ export function buildTrackWhatsAppSummary(
     lines.push("");
     lines.push("*Category Summary*");
     for (const row of stats.categoryBreakdown) {
-      lines.push(`${row.label}: ${formatSummaryCurrency(row.amount)}`);
+      lines.push(`- ${row.label}: ${formatSummaryCurrency(row.amount)}`);
     }
-    lines.push("");
-    lines.push(`*Total: ${formatSummaryCurrency(stats.totalAmount)}*`);
   }
 
   lines.push("");
-  lines.push(`_Generated from ${brand}_`);
+  lines.push(divider);
+  lines.push(`_${brand} · ${stats.totalEntries} entr${stats.totalEntries === 1 ? "y" : "ies"}_`);
 
   return lines.join("\n");
 }

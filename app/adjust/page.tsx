@@ -8,6 +8,7 @@ import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
 import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
 import type { Entry, PaymentMethod } from "@/lib/types";
+import { canUserModifyEntry, entryModifyLockReason } from "@/lib/paymentWorkflow";
 import {
   amountInputClass,
   btnDeleteClass,
@@ -173,6 +174,14 @@ export default function AdjustPage() {
     }
     if (
       selected.type === "expense" &&
+      selected.approvalStatus === "pending" &&
+      (approvedBy.trim() || "") !== (selected.approvedBy ?? "")
+    ) {
+      payload.approvedBy = approvedBy.trim();
+    }
+    if (
+      selected.type === "expense" &&
+      !selected.approvalStatus &&
       (approvedBy.trim() || "") !== (selected.approvedBy ?? "")
     ) {
       payload.approvedBy = approvedBy.trim();
@@ -305,6 +314,10 @@ export default function AdjustPage() {
   const showCategory = isExpense || isWorker;
   const categoryOptions = isExpense ? expenseCategoryOptions : workerCategoryOptions;
   const nameOptions = isExpense ? requestedByOptions : workerOptions;
+  const isWorkflowExpense =
+    selected?.type === "expense" && !!(selected.approvalStatus || selected.paymentStatus);
+  const entryLocked = selected ? !canUserModifyEntry(selected) : false;
+  const lockReason = selected ? entryModifyLockReason(selected) : null;
 
   return (
     <div className="min-h-screen bg-[#F4F8FC]">
@@ -424,6 +437,12 @@ export default function AdjustPage() {
               </button>
             </div>
 
+            {entryLocked && lockReason && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {lockReason}
+              </div>
+            )}
+
             {showName && (
               <SearchableDropdown
                 label={isExpense ? "Requested by" : "Worker"}
@@ -448,7 +467,18 @@ export default function AdjustPage() {
               />
             )}
 
-            {isExpense && (
+            {isExpense && isWorkflowExpense && selected?.approvalStatus === "pending" && (
+              <SearchableDropdown
+                label="Approved by"
+                value={approvedBy}
+                onChange={setApprovedBy}
+                options={approvedByOptions}
+                placeholder="Who approved on site?"
+                addNewLabel="Use this name"
+              />
+            )}
+
+            {isExpense && !isWorkflowExpense && (
               <SearchableDropdown
                 label="Approved by"
                 value={approvedBy}
@@ -531,14 +561,14 @@ export default function AdjustPage() {
               </p>
             </div>
 
-            <button type="submit" disabled={saving || deleting} className={btnSaveClass}>
+            <button type="submit" disabled={saving || deleting || entryLocked} className={btnSaveClass}>
               {saving ? "Saving…" : "Save Changes"}
             </button>
 
             <button
               type="button"
               onClick={handleDelete}
-              disabled={deleting || saving}
+              disabled={deleting || saving || entryLocked}
               className={btnDeleteClass}
             >
               {deleting ? "Deleting…" : "Delete Entry"}

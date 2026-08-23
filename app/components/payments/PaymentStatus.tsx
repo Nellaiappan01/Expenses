@@ -1,0 +1,167 @@
+"use client";
+
+import type { Entry } from "@/lib/types";
+import {
+  formatPaymentVerifiedMethod,
+  paymentStatusLabel,
+  requestLabel,
+  workflowBadgeMeta,
+} from "@/lib/paymentWorkflow";
+import { formatDateDDMMYYYY } from "@/lib/dateFormat";
+
+function WorkflowStatusIcon({
+  kind,
+}: {
+  kind: "pending_approval" | "payment_pending" | "paid" | "rejected";
+}) {
+  const className = "h-3.5 w-3.5 shrink-0";
+
+  if (kind === "pending_approval") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        />
+      </svg>
+    );
+  }
+
+  if (kind === "payment_pending") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+        />
+      </svg>
+    );
+  }
+
+  if (kind === "paid") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    </svg>
+  );
+}
+
+export function PaymentStatusBadge({
+  entry,
+}: {
+  entry: Pick<
+    Entry,
+    "type" | "approvalStatus" | "paymentStatus" | "paymentVerifiedMethod" | "paymentDate" | "paymentReference"
+  >;
+}) {
+  const meta = workflowBadgeMeta(entry);
+  if (!meta) return null;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.className}`}
+    >
+      <WorkflowStatusIcon kind={meta.icon} />
+      {meta.label}
+    </span>
+  );
+}
+
+export function PaymentStatusDetail({
+  entry,
+}: {
+  entry: Entry;
+}) {
+  if (entry.type !== "expense") return null;
+  if (!entry.approvalStatus && !entry.paymentStatus) {
+    if (entry.approvedBy) {
+      return (
+        <div className="mt-2 space-y-1 rounded-lg bg-[#F4F8FC] p-2 text-xs text-[#5A7FA5]">
+          <p>Approved by: {entry.approvedBy}</p>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const meta = workflowBadgeMeta(entry);
+
+  return (
+    <div className="mt-2 space-y-1.5 rounded-xl border border-slate-200/80 bg-white p-3 text-xs text-[var(--text-muted)]">
+      <p>
+        <span className="font-semibold">Requested by:</span> {entry.name}
+      </p>
+      {entry.approvedBy && (
+        <p>
+          <span className="font-semibold">Approved by:</span> {entry.approvedBy}
+        </p>
+      )}
+      {entry.paymentDueDate && entry.paymentStatus !== "paid" && (
+        <p>
+          <span className="font-semibold">Pay on:</span>{" "}
+          {formatDateDDMMYYYY(entry.paymentDueDate)}
+        </p>
+      )}
+      <p className="flex flex-wrap items-center gap-1.5">
+        <span className="font-semibold">Status:</span>
+        {meta ? <PaymentStatusBadge entry={entry} /> : paymentStatusLabel(entry.paymentStatus)}
+      </p>
+      {entry.paymentStatus === "paid" && (
+        <>
+          {entry.paymentVerifiedMethod && (
+            <p>
+              <span className="font-semibold">Payment method:</span>{" "}
+              {formatPaymentVerifiedMethod(entry.paymentVerifiedMethod)}
+            </p>
+          )}
+          {entry.paymentDate && (
+            <p>
+              <span className="font-semibold">Paid on:</span>{" "}
+              {formatDateDDMMYYYY(entry.paymentDate)}
+            </p>
+          )}
+          {entry.paymentReference && (
+            <p>
+              <span className="font-semibold">Reference:</span> {entry.paymentReference}
+            </p>
+          )}
+          {entry.paymentPaidTo && (
+            <p>
+              <span className="font-semibold">Paid to:</span> {entry.paymentPaidTo}
+            </p>
+          )}
+          {entry.paymentVerifiedBy && (
+            <p>
+              <span className="font-semibold">Verified by:</span> {entry.paymentVerifiedBy}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export function paymentEntryTitle(entry: Pick<Entry, "note" | "category" | "name">) {
+  return requestLabel(entry);
+}

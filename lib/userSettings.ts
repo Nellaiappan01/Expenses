@@ -18,7 +18,23 @@ export type UserSettings = {
 };
 
 export const SHEET_COLUMN_PATTERN =
-  "Date | Opening Balance | Category | Expenses Amount | Notes | Add on | Source | Closing Balance | Requested by | Approved by | Entry ID | Adjust Reason";
+  "Date | Opening Balance | Category | Expenses Amount | Notes | Add on | Source | Closing Balance | Requested by | Approved by | Payment Status | Adjust Reason | Entry ID";
+
+export const SHEET_COLUMNS = [
+  "Date",
+  "Opening Balance",
+  "Category",
+  "Expenses Amount",
+  "Notes",
+  "Add on",
+  "Source",
+  "Closing Balance",
+  "Requested by",
+  "Approved by",
+  "Payment Status",
+  "Adjust Reason",
+  "Entry ID",
+] as const;
 
 export const DEFAULT_BRANDING: UserBranding = {
   appName: APP_NAME,

@@ -4,6 +4,10 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useConfig } from "../context/ConfigContext";
+import ExpensePeopleSection from "../components/defaults/ExpensePeopleSection";
+import { TrashIcon } from "../components/EditEntrySheet";
+import type { ExpensePerson } from "@/lib/types";
+import { sanitizeExpensePerson } from "@/lib/expensePeople";
 
 function fieldClass() {
   return "min-w-0 flex-1 rounded-xl border border-[#D6E6F5] bg-[#F8FBFE] px-3 py-2.5 text-sm text-[#0B4A8C] outline-none transition-colors placeholder:text-[#9BB5CC] focus:border-[#0B4A8C] focus:bg-white [font-size:16px]";
@@ -65,12 +69,10 @@ function DefaultsListSection({
               <button
                 type="button"
                 onClick={() => onRemove(i)}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#7A9BB8] hover:bg-red-50 hover:text-red-600"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-red-500 hover:bg-red-50"
                 aria-label={`Remove ${item}`}
               >
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <TrashIcon className="h-3.5 w-3.5" />
               </button>
             </li>
           ))}
@@ -85,6 +87,7 @@ function DefaultsListSection({
 type DefaultsState = {
   expenseCategories: string[];
   expenseNames: string[];
+  expensePeople: ExpensePerson[];
   approverNames: string[];
   expenseTags: string[];
   workerNames: string[];
@@ -96,6 +99,7 @@ type DefaultsState = {
 const EMPTY: DefaultsState = {
   expenseCategories: [],
   expenseNames: [],
+  expensePeople: [],
   approverNames: [],
   expenseTags: [],
   workerNames: [],
@@ -127,6 +131,7 @@ export default function DefaultsPage() {
       setData({
         expenseCategories: d.expenseCategories ?? [],
         expenseNames: d.expenseNames ?? [],
+        expensePeople: d.expensePeople ?? [],
         approverNames: d.approverNames ?? [],
         expenseTags: d.expenseTags ?? [],
         workerNames: d.workerNames ?? [],
@@ -145,21 +150,59 @@ export default function DefaultsPage() {
     loadDefaults();
   }, [loadDefaults]);
 
-  function addItem(field: keyof DefaultsState, draftKey: string) {
+type StringListField = Exclude<keyof DefaultsState, "expensePeople">;
+
+  function addItem(field: StringListField, draftKey: string) {
     const v = (drafts[draftKey] ?? "").trim();
     if (!v) return;
     setData((prev) => {
-      const list = prev[field];
+      const list = prev[field] as string[];
       if (list.some((x) => x.toLowerCase() === v.toLowerCase())) return prev;
       return { ...prev, [field]: [...list, v] };
     });
     setDraft(draftKey, "");
   }
 
-  function removeItem(field: keyof DefaultsState, index: number) {
+  function removeItem(field: StringListField, index: number) {
     setData((prev) => ({
       ...prev,
-      [field]: prev[field].filter((_, i) => i !== index),
+      [field]: (prev[field] as string[]).filter((_, i) => i !== index),
+    }));
+  }
+
+  function addExpensePerson() {
+    const v = (drafts.expenseName ?? "").trim();
+    if (!v) return;
+    const person = sanitizeExpensePerson({ name: v, preferredMethod: "cash", cashOk: true });
+    if (!person) return;
+    setData((prev) => {
+      if (prev.expensePeople.some((p) => p.nameLower === person.nameLower)) return prev;
+      const expensePeople = [...prev.expensePeople, person];
+      return {
+        ...prev,
+        expensePeople,
+        expenseNames: expensePeople.map((p) => p.name),
+      };
+    });
+    setDraft("expenseName", "");
+  }
+
+  function removeExpensePerson(index: number) {
+    setData((prev) => {
+      const expensePeople = prev.expensePeople.filter((_, i) => i !== index);
+      return {
+        ...prev,
+        expensePeople,
+        expenseNames: expensePeople.map((p) => p.name),
+      };
+    });
+  }
+
+  function updateExpensePeople(expensePeople: ExpensePerson[]) {
+    setData((prev) => ({
+      ...prev,
+      expensePeople,
+      expenseNames: expensePeople.map((p) => p.name),
     }));
   }
 
@@ -178,6 +221,7 @@ export default function DefaultsPage() {
       setData({
         expenseCategories: saved.expenseCategories ?? [],
         expenseNames: saved.expenseNames ?? [],
+        expensePeople: saved.expensePeople ?? [],
         approverNames: saved.approverNames ?? [],
         expenseTags: saved.expenseTags ?? [],
         workerNames: saved.workerNames ?? [],
@@ -243,15 +287,13 @@ export default function DefaultsPage() {
             onRemove={(i) => removeItem("expenseCategories", i)}
           />
 
-          <DefaultsListSection
-            title="Requested by"
-            hint="People who request expenses — Requested by dropdown."
-            placeholder="Add name"
-            items={data.expenseNames}
+          <ExpensePeopleSection
+            people={data.expensePeople}
             draft={drafts.expenseName ?? ""}
             onDraftChange={(v) => setDraft("expenseName", v)}
-            onAdd={() => addItem("expenseNames", "expenseName")}
-            onRemove={(i) => removeItem("expenseNames", i)}
+            onAdd={addExpensePerson}
+            onChange={updateExpensePeople}
+            onRemove={removeExpensePerson}
           />
 
           <DefaultsListSection

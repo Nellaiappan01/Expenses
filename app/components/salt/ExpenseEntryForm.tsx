@@ -3,17 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { amountInWords } from "@/lib/amountInWords";
+import { isNetworkFailure, queueOfflineEntry } from "@/lib/offlineEntryQueue";
+import { notifyLedgerDataChanged } from "@/lib/clientDataCache";
 import type { PaymentMethod } from "@/lib/types";
 import SearchableDropdown from "../ui/SearchableDropdown";
 import AttachmentUploader from "./AttachmentUploader";
-import ExpensePaymentToggle from "./ExpensePaymentToggle";
 
 function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
 
 function fieldClass() {
-  return "w-full min-h-[48px] rounded-xl border border-[#D6E6F5] bg-[#F8FBFE] px-3 py-3 text-base text-[#0B4A8C] outline-none transition-colors placeholder:text-[#9BB5CC] focus:border-[#0B4A8C] focus:bg-white [font-size:16px]";
+  return "ui-input";
 }
 
 export default function ExpenseEntryForm({
@@ -29,26 +30,24 @@ export default function ExpenseEntryForm({
   const [note, setNote] = useState("");
   const [requestedBy, setRequestedBy] = useState("");
   const [approvedBy, setApprovedBy] = useState("");
-  const [method, setMethod] = useState<PaymentMethod>("Cash");
-  const [tags, setTags] = useState("");
+  const [paymentDueDate, setPaymentDueDate] = useState(todayISO);
+  const method: PaymentMethod = "Cash";
   const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
   const [attachmentPublicId, setAttachmentPublicId] = useState<string | null>(null);
 
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [requestedByOptions, setRequestedByOptions] = useState<string[]>([]);
   const [approvedByOptions, setApprovedByOptions] = useState<string[]>([]);
-  const [tagOptions, setTagOptions] = useState<string[]>([]);
 
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
   const amountWords = useMemo(() => amountInWords(amount), [amount]);
 
   const categoryRef = useRef<HTMLInputElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const requestedRef = useRef<HTMLInputElement>(null);
-  const approvedRef = useRef<HTMLInputElement>(null);
 
   const loadDefaults = useCallback(async () => {
     const res = await apiFetch("/api/defaults");
@@ -58,12 +57,10 @@ export default function ExpenseEntryForm({
           expenseCategories: [],
           expenseNames: [],
           approverNames: [],
-          expenseTags: [],
         };
     setCategoryOptions(defaults.expenseCategories ?? []);
     setRequestedByOptions(defaults.expenseNames ?? []);
     setApprovedByOptions(defaults.approverNames ?? []);
-    setTagOptions(defaults.expenseTags ?? []);
   }, []);
 
   useEffect(() => {
@@ -85,25 +82,20 @@ export default function ExpenseEntryForm({
     };
   }, [loadDefaults]);
 
-  useEffect(() => {
-    if (!success) return;
-    const timer = setTimeout(() => setSuccess(false), 2500);
-    return () => clearTimeout(timer);
-  }, [success]);
-
-  function resetForm(keepMethod: PaymentMethod) {
+  function resetForm() {
     setCategory("");
     setAmount("");
     setNote("");
     setRequestedBy("");
     setApprovedBy("");
-    setTags("");
+    setPaymentDueDate(todayISO());
     setDate(todayISO());
-    setMethod(keepMethod);
     setAttachmentUrl(null);
     setAttachmentPublicId(null);
     setError("");
-    requestAnimationFrame(() => categoryRef.current?.focus());
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -112,12 +104,13 @@ export default function ExpenseEntryForm({
 
     const trimmedCategory = category.trim();
     const trimmedRequested = requestedBy.trim();
-    const trimmedApproved = approvedBy.trim();
     const numAmount = Number(amount);
 
     if (!trimmedCategory) {
       setError("Category is required");
-      categoryRef.current?.focus();
+      if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+        categoryRef.current?.focus();
+      }
       return;
     }
     if (!amount || Number.isNaN(numAmount) || numAmount <= 0) {
@@ -130,102 +123,148 @@ export default function ExpenseEntryForm({
       requestedRef.current?.focus();
       return;
     }
-    if (!trimmedApproved) {
-      setError("Approved by is required");
-      approvedRef.current?.focus();
+    if (approvedBy.trim() && !paymentDueDate) {
+      setError("Select payment date — when will you pay this person?");
       return;
     }
 
     setError("");
     setSaving(true);
 
+    const payload = {
+      type: "expense" as const,
+      name: trimmedRequested,
+      category: trimmedCategory,
+      amount: numAmount,
+      method,
+      date,
+      note: note.trim() || undefined,
+      approvedBy: approvedBy.trim() || undefined,
+      paymentDueDate: approvedBy.trim() ? paymentDueDate : undefined,
+      attachmentUrl: attachmentUrl ?? undefined,
+      attachmentPublicId: attachmentPublicId ?? undefined,
+    };
+
     try {
-      const tagList = tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        queueOfflineEntry(payload);
+        setSaving(false);
+        setSaved(true);
+        notifyLedgerDataChanged();
+        onSuccess?.();
+        window.setTimeout(() => {
+          resetForm();
+          setSaved(false);
+        }, 1200);
+        return;
+      }
 
       const res = await apiFetch("/api/entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "expense",
-          name: trimmedRequested,
-          category: trimmedCategory,
-          amount: numAmount,
-          method,
-          date,
-          note: note.trim() || undefined,
-          approvedBy: trimmedApproved,
-          attachmentUrl: attachmentUrl ?? undefined,
-          attachmentPublicId: attachmentPublicId ?? undefined,
-          tags: tagList.length ? tagList : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const data = await res.json();
+        if (res.status === 502 && data.entry) {
+          setSaving(false);
+          setSaved(true);
+          notifyLedgerDataChanged();
+          onSuccess?.();
+          loadDefaults();
+          window.setTimeout(() => {
+            resetForm();
+            setSaved(false);
+          }, 1200);
+          return;
+        }
         throw new Error(data.error || "Failed to save");
       }
 
-      const savedMethod = method;
-      resetForm(savedMethod);
-      setSuccess(true);
+      setSaving(false);
+      setSaved(true);
+      notifyLedgerDataChanged();
       onSuccess?.();
       loadDefaults();
+
+      window.setTimeout(() => {
+        resetForm();
+        setSaved(false);
+      }, 1200);
     } catch (err) {
+      if (isNetworkFailure(err)) {
+        queueOfflineEntry(payload);
+        setSaving(false);
+        setSaved(true);
+        notifyLedgerDataChanged();
+        onSuccess?.();
+        window.setTimeout(() => {
+          resetForm();
+          setSaved(false);
+        }, 1200);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setSaving(false);
     }
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="form-enter rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm"
-    >
-      <div className="space-y-3">
-        <div className="min-w-0">
-          <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]">
-            Date
-          </label>
-          <div className="relative">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-              aria-label="Date"
-              className={`${fieldClass()} pr-9`}
-            />
-            <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#7A9BB8]">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+    <form onSubmit={handleSubmit} className="form-enter ui-card p-4 sm:p-5">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div>
+          <h2 className="ui-section-title">New expense</h2>
+          <p className="mt-0.5 text-xs text-[var(--text-faint)]">Record a site expense</p>
+        </div>
+      </div>
+      <div className="space-y-3.5">
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="min-w-0">
+            <label className="ui-label">Date</label>
+            <div className="relative">
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+                aria-label="Date"
+                className={`${fieldClass()} pr-8`}
+              />
+              <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[#7A9BB8]">
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
             </div>
+          </div>
+
+          <div className="min-w-0">
+            <SearchableDropdown
+              label="Category"
+              value={category}
+              onChange={setCategory}
+              options={categoryOptions}
+              placeholder="Select category"
+              addNewLabel="Add category"
+              required
+              inputRef={categoryRef}
+              onEnter={() => amountRef.current?.focus()}
+              inputClassName={fieldClass()}
+              labelClassName="ui-label"
+            />
           </div>
         </div>
 
-        <div className="min-w-0">
-          <SearchableDropdown
-            label="Category"
-            value={category}
-            onChange={setCategory}
-            options={categoryOptions}
-            placeholder="Select category"
-            addNewLabel="Add category"
-            required
-            inputRef={categoryRef}
-            onEnter={() => amountRef.current?.focus()}
-            inputClassName={fieldClass()}
-            labelClassName="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]"
-          />
-        </div>
-
         <div>
-          <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#0B4A8C]">
+          <label className="ui-label">
+            Amount <span className="text-red-500">*</span>
+          </label>
+          <div
+            className={`${fieldClass()} flex items-center gap-2 !px-3 focus-within:border-[rgba(11,74,140,0.22)] focus-within:bg-white focus-within:shadow-[0_0_0_3px_rgba(11,74,140,0.1)]`}
+          >
+            <span className="shrink-0 text-base font-semibold text-[#0B4A8C]" aria-hidden>
               ₹
             </span>
             <input
@@ -234,11 +273,11 @@ export default function ExpenseEntryForm({
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-              placeholder="Expenses amount *"
+              placeholder="Expenses amount"
               required
               aria-label="Expenses amount"
               aria-describedby={amountWords ? "amount-in-words" : undefined}
-              className={`${fieldClass()} pl-8 text-base font-semibold tabular-nums`}
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-base font-semibold tabular-nums text-[var(--foreground)] outline-none placeholder:text-[var(--text-faint)] [font-size:16px]"
             />
           </div>
           {amountWords && (
@@ -274,23 +313,51 @@ export default function ExpenseEntryForm({
             required
             inputRef={requestedRef}
             inputClassName={fieldClass()}
-            labelClassName="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]"
-          />
-          <SearchableDropdown
-            label="Approved by"
-            value={approvedBy}
-            onChange={setApprovedBy}
-            options={approvedByOptions}
-            placeholder="Select approver"
-            addNewLabel="Add approver"
-            required
-            inputRef={approvedRef}
-            inputClassName={fieldClass()}
-            labelClassName="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]"
+            labelClassName="ui-label"
           />
         </div>
 
-        <ExpensePaymentToggle value={method} onChange={setMethod} />
+        <div className="min-w-0">
+          <SearchableDropdown
+            label="Approved by"
+            value={approvedBy}
+            onChange={(value) => {
+              setApprovedBy(value);
+              if (!value.trim()) setPaymentDueDate(todayISO());
+            }}
+            options={approvedByOptions}
+            placeholder="Who approved on site? (optional now)"
+            addNewLabel="Add approver"
+            inputClassName={fieldClass()}
+            labelClassName="ui-label"
+          />
+        </div>
+
+        {approvedBy.trim() ? (
+          <div className="min-w-0">
+            <label className="ui-label">
+              Payment date <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="date"
+                value={paymentDueDate}
+                onChange={(e) => setPaymentDueDate(e.target.value)}
+                required
+                aria-label="Payment date — when you will pay this person"
+                className={`${fieldClass()} pr-9`}
+              />
+              <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#7A9BB8]">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            </div>
+            <p className="mt-1 px-1 text-xs text-[#5A7FA5]">
+              When will you pay {requestedBy.trim() || "this person"}? Admin sees this date.
+            </p>
+          </div>
+        ) : null}
 
         <div className="min-w-0">
           <AttachmentUploader
@@ -305,46 +372,46 @@ export default function ExpenseEntryForm({
           />
         </div>
 
-        <div className="min-w-0">
-          <SearchableDropdown
-            hideLabel
-            label="Tags"
-            value={tags}
-            onChange={setTags}
-            options={tagOptions}
-            placeholder="Tags (optional)"
-            addNewLabel="Add tag"
-            inputClassName={fieldClass()}
-          />
-        </div>
-
         {error && (
           <p className="text-sm text-red-600" role="alert">
             {error}
           </p>
         )}
 
-        {success && (
-          <div
-            className="success-enter flex items-center gap-2 rounded-xl bg-[#EEF5FC] px-3 py-2 text-sm font-medium text-[#0B4A8C]"
-            role="status"
-          >
-            <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-            Entry saved successfully
-          </div>
-        )}
-
         <button
           type="submit"
-          disabled={saving}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4A8C] py-3.5 text-base font-bold text-white transition-all hover:bg-[#083A6E] active:scale-[0.99] disabled:opacity-60"
+          disabled={saving || saved}
+          aria-live="polite"
+          className={`ui-btn-primary disabled:opacity-60 ${
+            saved ? "salt-save-btn-success !shadow-none" : ""
+          }`}
         >
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-          </svg>
-          {saving ? "Saving…" : "Save Entry"}
+          {saved ? (
+            <>
+              <svg
+                className="salt-save-check h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2.5}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              Saved
+            </>
+          ) : (
+            <>
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                />
+              </svg>
+              {saving ? "Saving…" : "Save Entry"}
+            </>
+          )}
         </button>
       </div>
     </form>

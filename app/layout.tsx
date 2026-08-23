@@ -56,7 +56,7 @@ export default function RootLayout({
         <meta name="color-scheme" content="light only" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} bg-[#F4F8FC] text-[#171717] antialiased pb-20`}
+        className={`${geistSans.variable} ${geistMono.variable} bg-[var(--background)] text-[var(--foreground)] antialiased pb-28`}
       >
         <UserProvider>
           <ConfigProvider>

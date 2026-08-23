@@ -22,7 +22,10 @@ export async function GET(
     const to = searchParams.get("to");
     const limit = Math.min(Number(searchParams.get("limit")) || 50, 200);
 
-    const match: Record<string, unknown> = { businessId: targetUserId };
+    const match: Record<string, unknown> = {
+      businessId: targetUserId,
+      deleted: { $ne: true },
+    };
     if (from || to) {
       match.date = {};
       if (from) (match.date as Record<string, string>).$gte = from;

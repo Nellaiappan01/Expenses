@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiFetch } from "@/lib/api";
+import { cachedApiJson, cacheKey, readClientCache } from "@/lib/clientDataCache";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import { EMPTY_TOTALS, formatCurrency, type TotalsBreakdown } from "@/lib/totals";
 import { useConfig } from "../context/ConfigContext";
@@ -47,16 +47,15 @@ export default function TotalsPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchTotals = useCallback(async () => {
-    setLoading(true);
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    const url = `/api/totals?${params}`;
+    const hasCache = readClientCache<TotalsBreakdown>(cacheKey(url)) !== null;
+    if (!hasCache) setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
-      const res = await apiFetch(`/api/totals?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setTotals({ ...EMPTY_TOTALS, ...data });
-      }
+      const { data } = await cachedApiJson<TotalsBreakdown>(url, 60_000);
+      if (data) setTotals({ ...EMPTY_TOTALS, ...data });
     } catch (err) {
       console.error("Failed to fetch totals:", err);
     } finally {
@@ -89,8 +88,8 @@ export default function TotalsPage() {
           : "All time";
 
   return (
-    <div className="min-h-screen bg-[#F4F8FC]">
-      <div className="mx-auto max-w-md px-4 py-6 pb-24 sm:px-5">
+    <div className="min-h-screen bg-[var(--background)]">
+      <div className="mx-auto max-w-md px-4 py-6 pb-28 sm:px-5">
         <header className="mb-5 flex items-center gap-3">
           <Link
             href="/"

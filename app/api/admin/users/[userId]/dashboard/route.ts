@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { computeNetBalance } from "@/lib/balance";
+import { ENTRY_TOTALS_GROUP_FIELDS } from "@/lib/entryAmount";
+import { buildTotalsBreakdown, EMPTY_TOTALS } from "@/lib/totals";
 
 export async function GET(
   request: NextRequest,
@@ -20,54 +23,48 @@ export async function GET(
     const from = searchParams.get("from");
     const to = searchParams.get("to");
 
-    const match: Record<string, unknown> = { businessId: targetUserId };
+    const match: Record<string, unknown> = {
+      businessId: targetUserId,
+      deleted: { $ne: true },
+    };
     if (from || to) {
       match.date = {};
       if (from) (match.date as Record<string, string>).$gte = from;
       if (to) (match.date as Record<string, string>).$lte = to;
     }
 
-    const result = await db
+    const [row] = await db
       .collection("entries")
-      .aggregate<{ _id: string; total: number }>([
+      .aggregate<{
+        walletIn: number;
+        walletOut: number;
+        expense: number;
+        workerPayment: number;
+        adjustment: number;
+      }>([
         { $match: match },
-        { $group: { _id: "$type", total: { $sum: "$amount" } } },
+        {
+          $group: {
+            _id: null,
+            ...ENTRY_TOTALS_GROUP_FIELDS,
+          },
+        },
       ])
       .toArray();
 
-    const totals = {
-      rotationCash: 0,
-      expense: 0,
-      workerPayment: 0,
-      adjustment: 0,
-      received: 0,
-      paid: 0,
-      net: 0,
-    };
+    const period = row ? buildTotalsBreakdown(row) : { ...EMPTY_TOTALS };
+    const closingBalance = await computeNetBalance(db, targetUserId);
 
-    for (const row of result) {
-      if (row._id === "rotation_cash") totals.rotationCash = row.total;
-      else if (row._id === "expense") totals.expense = row.total;
-      else if (row._id === "worker_payment") totals.workerPayment = row.total;
-      else if (row._id === "adjustment") totals.adjustment = row.total;
-    }
-
-    totals.received = totals.rotationCash;
-    totals.paid = totals.expense + totals.workerPayment;
-    totals.net = totals.received - totals.paid + totals.adjustment;
-
-    return NextResponse.json(totals);
+    return NextResponse.json({
+      ...period,
+      closingBalance,
+    });
   } catch (error) {
     console.error("Admin get user dashboard error:", error);
     return NextResponse.json(
       {
-        rotationCash: 0,
-        expense: 0,
-        workerPayment: 0,
-        adjustment: 0,
-        received: 0,
-        paid: 0,
-        net: 0,
+        ...EMPTY_TOTALS,
+        closingBalance: 0,
       },
       { status: 500 }
     );

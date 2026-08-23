@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { invalidateBalanceCache } from "@/lib/balance";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
-import { syncEntryAdjustment } from "@/lib/googleSheetsSync";
-import { getDb } from "@/lib/mongodb";import { getUserId } from "@/lib/user";
+import { scheduleSheetsAdjustment } from "@/lib/googleSheetsSync";
+import { getDb } from "@/lib/mongodb";
+import { getUserId } from "@/lib/user";
+import { canUserModifyEntry, entryModifyLockReason } from "@/lib/paymentWorkflow";
+import { ensureApproverName } from "@/lib/expenseDefaultsHelpers";
 import {
   buildUpdateAuditChanges,
   NOT_DELETED_MATCH,
   recordEntryAuditLogs,
 } from "@/lib/entryAudit";
-import type { EntryInput, EntryType, PaymentMethod } from "@/lib/types";
+import type { EntryInput, EntryType, PaymentMethod, Entry } from "@/lib/types";
 
 type AdjustBody = Partial<EntryInput> & {
   reason: string;
@@ -27,7 +30,7 @@ export async function PATCH(
     }
 
     const body: AdjustBody = await request.json();
-    const { reason, editedBy, name, amount, method, date, category, note, bankName, approvedBy } = body;
+    const { reason, editedBy, name, amount, method, date, category, note, bankName, approvedBy, excludeFromProfitability } = body;
 
     if (!reason?.trim()) {
       return NextResponse.json({ error: "Reason is required for adjustments" }, { status: 400 });
@@ -47,6 +50,12 @@ export async function PATCH(
     });
     if (!existing) {
       return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+    }
+
+    const entryForLock = existing as unknown as Entry;
+    const lockReason = entryModifyLockReason(entryForLock);
+    if (!canUserModifyEntry(entryForLock)) {
+      return NextResponse.json({ error: lockReason ?? "Entry is locked" }, { status: 403 });
     }
 
     const setUpdate: Record<string, unknown> = {};
@@ -98,15 +107,50 @@ export async function PATCH(
       auditInput.bankName = trimmed || null;
     }
     if (approvedBy !== undefined) {
+      const isWorkflowExpense =
+        existing.type === "expense" &&
+        (existing.approvalStatus || existing.paymentStatus);
+      if (isWorkflowExpense && existing.approvalStatus !== "pending") {
+        return NextResponse.json(
+          { error: "Approved by cannot be changed after payment is queued." },
+          { status: 403 }
+        );
+      }
       const trimmed = approvedBy.trim();
-      if (trimmed) {
+      if (isWorkflowExpense && existing.approvalStatus === "pending") {
+        if (!trimmed) {
+          return NextResponse.json(
+            { error: "Approved by is required to send for payment" },
+            { status: 400 }
+          );
+        }
+        await ensureApproverName(db, userId, trimmed);
         setUpdate.approvedBy = trimmed;
         setUpdate.approvedByLower = trimmed.toLowerCase();
-      } else {
-        unsetUpdate.approvedBy = "";
-        unsetUpdate.approvedByLower = "";
+        setUpdate.approvalStatus = "approved";
+        setUpdate.approvedAt = new Date();
+        setUpdate.paymentStatus = "pending";
+        auditInput.approvedBy = trimmed;
+        auditInput.approvalStatus = "approved";
+      } else if (!isWorkflowExpense) {
+        if (trimmed) {
+          setUpdate.approvedBy = trimmed;
+          setUpdate.approvedByLower = trimmed.toLowerCase();
+        } else {
+          unsetUpdate.approvedBy = "";
+          unsetUpdate.approvedByLower = "";
+        }
+        auditInput.approvedBy = trimmed || null;
       }
-      auditInput.approvedBy = trimmed || null;
+    }
+    if (excludeFromProfitability !== undefined && existing.type === "expense") {
+      if (excludeFromProfitability) {
+        setUpdate.excludeFromProfitability = true;
+        auditInput.excludeFromProfitability = true;
+      } else {
+        unsetUpdate.excludeFromProfitability = "";
+        auditInput.excludeFromProfitability = false;
+      }
     }
 
     const changes = buildUpdateAuditChanges(existing as Record<string, unknown>, auditInput);
@@ -144,7 +188,7 @@ export async function PATCH(
 
     invalidateBalanceCache(userId);
 
-    const sheetsResult = await syncEntryAdjustment(
+    scheduleSheetsAdjustment(
       db,
       userId,
       id,
@@ -158,8 +202,8 @@ export async function PATCH(
       ...result,
       _id: result._id?.toString(),
       createdAt: result.createdAt?.toISOString?.(),
-      sheetsSyncStatus: sheetsResult.status,
-      sheetsSyncError: sheetsResult.error ?? null,
+      sheetsSyncStatus: "pending",
+      sheetsSyncError: null,
     });
   } catch (error) {
     console.error("Error adjusting entry:", error);
@@ -207,6 +251,12 @@ export async function DELETE(
       return NextResponse.json({ error: "Entry not found" }, { status: 404 });
     }
 
+    const entryForLock = existing as unknown as Entry;
+    const lockReason = entryModifyLockReason(entryForLock);
+    if (!canUserModifyEntry(entryForLock)) {
+      return NextResponse.json({ error: lockReason ?? "Entry is locked" }, { status: 403 });
+    }
+
     const snapshot = {
       type: existing.type,
       name: existing.name,
@@ -248,7 +298,7 @@ export async function DELETE(
 
     invalidateBalanceCache(userId);
 
-    const sheetsResult = await syncEntryAdjustment(
+    scheduleSheetsAdjustment(
       db,
       userId,
       id,
@@ -261,8 +311,8 @@ export async function DELETE(
       ...result,
       _id: result._id?.toString(),
       createdAt: result.createdAt?.toISOString?.(),
-      sheetsSyncStatus: sheetsResult.status,
-      sheetsSyncError: sheetsResult.error ?? null,
+      sheetsSyncStatus: "pending",
+      sheetsSyncError: null,
     });
   } catch (error) {
     console.error("Error deleting entry:", error);

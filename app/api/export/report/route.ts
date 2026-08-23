@@ -173,6 +173,7 @@ export async function GET(request: NextRequest) {
         { header: "Closing Balance", key: "closingBalance", width: 16 },
         { header: "Requested by", key: "requestedBy", width: 18 },
         { header: "Approved by", key: "approvedBy", width: 18 },
+        { header: "Payment Status", key: "paymentStatus", width: 18 },
       ];
       styleHeader(ledgerWs);
       for (const row of ledgerRows) {

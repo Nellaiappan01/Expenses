@@ -10,6 +10,7 @@ const DEFAULT_CONFIG = {
     workers: true,
     stock: false,
     user_delete: false,
+    profitability: false,
   },
 };
 

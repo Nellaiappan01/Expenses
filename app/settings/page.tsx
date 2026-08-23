@@ -1,13 +1,24 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useConfig } from "../context/ConfigContext";
-import { SHEET_COLUMN_PATTERN } from "@/lib/userSettings";
+import { SHEET_COLUMNS } from "@/lib/userSettings";
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+function fieldClass() {
+  return "ui-input !min-h-[44px]";
+}
+
+function CopyButton({
+  text,
+  label,
+  variant = "secondary",
+}: {
+  text: string;
+  label: string;
+  variant?: "primary" | "secondary";
+}) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -20,24 +31,24 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     }
   }
 
+  const className =
+    variant === "primary"
+      ? "ui-btn-primary !min-h-[40px] !py-2 !text-sm"
+      : "rounded-xl border border-[#D6E6F5] bg-white px-3 py-2 text-xs font-semibold text-[#0B4A8C] hover:bg-[#F8FBFE]";
+
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-    >
-      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-        />
-      </svg>
+    <button type="button" onClick={handleCopy} className={className}>
       {copied ? "Copied!" : label}
     </button>
   );
 }
+
+const SETUP_STEPS = [
+  "Create a Google Sheet — row 1 must use the column headers below.",
+  "Tap Copy script → Extensions → Apps Script → paste → Save.",
+  "Deploy → New deployment → Web app (Execute as: Me, Access: Anyone).",
+  "Copy the Web App URL and paste it below, then Save settings.",
+];
 
 export default function SettingsPage() {
   const ctx = useConfig();
@@ -49,6 +60,7 @@ export default function SettingsPage() {
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   const [bannerImageData, setBannerImageData] = useState<string | null>(null);
   const [appsScriptSource, setAppsScriptSource] = useState("");
+  const [appsScriptVersion, setAppsScriptVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -69,6 +81,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/integrations/apps-script");
       const data = await res.json();
       if (data.source) setAppsScriptSource(data.source);
+      if (data.version) setAppsScriptVersion(data.version);
     } catch {
       // ignore
     }
@@ -110,7 +123,7 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(data.error || "Failed to save");
       if (data.branding?.appName) setAppName(data.branding.appName);
       if (data.branding?.bannerUrl) setBannerPreview(data.branding.bannerUrl);
-      setMessage("Settings saved — header updated.");
+      setMessage("Settings saved.");
       setBannerImageData(null);
       refresh();
     } catch (err) {
@@ -121,111 +134,158 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">
-      <div className="mx-auto max-w-md px-4 py-6 pb-24 sm:px-5">
-        <header className="mb-6 flex items-center gap-3">
+    <div className="min-h-screen bg-[var(--background)] pb-28">
+      <div className="mx-auto max-w-md px-4 py-4">
+        <header className="mb-4 flex items-center gap-3">
           <Link
             href="/"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[#0B4A8C] shadow-sm ring-1 ring-[var(--border-soft)]"
             aria-label="Back"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">Account &amp; Sheet</h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Banner, Google Sheet &amp; Apps Script</p>
+            <h1 className="text-lg font-extrabold tracking-tight text-[#0B4A8C]">Account &amp; Sheet</h1>
+            <p className="text-xs text-[var(--text-muted)]">Branding and Google Sheets sync</p>
           </div>
         </header>
 
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Branding</h2>
+          <section className="ui-card p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#7A9BB8]">Branding</p>
             <div className="mt-3 space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-600">Business name</label>
-                <p className="mb-1.5 text-[10px] text-zinc-500">
-                  Shown in the top header on every page (one name only).
-                </p>
+                <label className="ui-label">Business name</label>
                 <input
                   type="text"
                   value={appName}
                   onChange={(e) => setAppName(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                  className={fieldClass()}
                   required
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-600">Banner image</label>
-                {bannerPreview && (
+                <label className="ui-label">Banner image</label>
+                {bannerPreview ? (
                   <img
                     src={bannerPreview}
                     alt="Banner preview"
-                    className="mb-2 h-24 w-full rounded-lg object-cover"
+                    className="mb-2 h-28 w-full rounded-xl object-cover ring-1 ring-[var(--border-soft)]"
                   />
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={onBannerChange}
-                  className="w-full text-sm text-zinc-600"
-                />
+                ) : null}
+                <label className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-[#D6E6F5] bg-[#F8FBFE] px-3 py-4 text-sm text-[#5A7FA5] hover:bg-white">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={onBannerChange}
+                    className="sr-only"
+                  />
+                  Choose banner image
+                </label>
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Google Sheet</h2>
-            <p className="mt-1 text-xs text-zinc-500">
-              Each account uses its own sheet. Row 1 must match this column order:
+          <section className="ui-card p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#7A9BB8]">
+              Google Sheet
             </p>
-            <div className="mt-2 flex flex-wrap items-start gap-2">
-              <code className="flex-1 rounded-lg bg-zinc-100 px-2 py-1.5 text-[10px] leading-relaxed text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                {SHEET_COLUMN_PATTERN}
-              </code>
-              <CopyButton text={SHEET_COLUMN_PATTERN} label="Copy columns" />
+            <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+              Each account uses its own sheet. Row 1 must match these columns:
+            </p>
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {SHEET_COLUMNS.map((col, i) => (
+                <span
+                  key={col}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#F8FBFE] px-2 py-1 text-[10px] font-medium text-[#0B4A8C] ring-1 ring-[#D6E6F5]"
+                >
+                  <span className="text-[#9BB5CC]">{i + 1}.</span>
+                  {col}
+                </span>
+              ))}
             </div>
-            <div className="mt-3 space-y-3">
+
+            <div className="mt-3">
+              <CopyButton
+                text={SHEET_COLUMNS.join("\t")}
+                label="Copy column headers"
+                variant="secondary"
+              />
+            </div>
+
+            <div className="mt-4">
+              <label className="ui-label">Google Sheet URL</label>
+              <input
+                type="url"
+                value={googleSheetUrl}
+                onChange={(e) => setGoogleSheetUrl(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                className={fieldClass()}
+              />
+            </div>
+          </section>
+
+          <section className="ui-card p-4">
+            <div className="flex items-start justify-between gap-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-600">Google Sheet URL</label>
-                <input
-                  type="url"
-                  value={googleSheetUrl}
-                  onChange={(e) => setGoogleSheetUrl(e.target.value)}
-                  placeholder="https://docs.google.com/spreadsheets/d/..."
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm dark:border-zinc-600 dark:bg-zinc-800"
-                />
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-zinc-600">Apps Script Web App URL</label>
-                  {appsScriptSource && (
-                    <CopyButton text={appsScriptSource} label="Copy script" />
-                  )}
-                </div>
-                <input
-                  type="url"
-                  value={appsScriptWebhookUrl}
-                  onChange={(e) => setAppsScriptWebhookUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm dark:border-zinc-600 dark:bg-zinc-800"
-                />
-                <p className="mt-1 text-[10px] text-zinc-500">
-                  Deploy the copied script in your sheet → paste the Web App URL here.
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#7A9BB8]">
+                  Apps Script
                 </p>
+                {appsScriptVersion ? (
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Latest script: <span className="font-semibold">{appsScriptVersion}</span>
+                  </p>
+                ) : null}
               </div>
+              {appsScriptSource ? (
+                <CopyButton text={appsScriptSource} label="Copy script" variant="primary" />
+              ) : null}
             </div>
-          </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {message && <p className="text-sm text-emerald-600">{message}</p>}
+            <ol className="mt-3 space-y-2">
+              {SETUP_STEPS.map((step, i) => (
+                <li key={step} className="flex gap-2.5 text-xs leading-relaxed text-[var(--text-muted)]">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#EEF5FC] text-[10px] font-bold text-[#0B4A8C]">
+                    {i + 1}
+                  </span>
+                  <span className="pt-0.5">{step}</span>
+                </li>
+              ))}
+            </ol>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-          >
+            <div className="mt-4 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900">
+              After pasting, confirm the script header shows{" "}
+              <strong>Version: {appsScriptVersion || "2026-08-24"}</strong>. Redeploy if you had
+              an older version.
+            </div>
+
+            <div className="mt-4">
+              <label className="ui-label">Web App URL</label>
+              <input
+                type="url"
+                value={appsScriptWebhookUrl}
+                onChange={(e) => setAppsScriptWebhookUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className={fieldClass()}
+              />
+            </div>
+          </section>
+
+          {error ? (
+            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          ) : null}
+          {message ? (
+            <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              {message}
+            </p>
+          ) : null}
+
+          <button type="submit" disabled={loading} className="ui-btn-primary disabled:opacity-60">
             {loading ? "Saving…" : "Save settings"}
           </button>
         </form>

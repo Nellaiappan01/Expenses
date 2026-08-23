@@ -10,9 +10,13 @@ export default function RequireUser({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const [checked, setChecked] = useState(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined") return true;
     if (pathname === "/select-user" || isPublicRoute(pathname)) return true;
-    return !!localStorage.getItem(USER_KEY);
+    try {
+      return !!localStorage.getItem(USER_KEY);
+    } catch {
+      return false;
+    }
   });
 
   useEffect(() => {
