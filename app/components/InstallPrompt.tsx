@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { APP_SHORT_NAME } from "@/lib/brandAssets";
 
 export default function InstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -42,7 +43,7 @@ export default function InstallPrompt() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-emerald-900 dark:text-emerald-100">
-            Install Ledger
+            Install {APP_SHORT_NAME}
           </p>
           <p className="mt-0.5 text-sm text-emerald-700 dark:text-emerald-300">
             Add to home screen for quick access

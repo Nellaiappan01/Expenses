@@ -1,13 +1,19 @@
 import { ObjectId, type Db } from "mongodb";
-import type { SheetsSyncStatus } from "./types";
+import { formatIsoDateForSheet } from "./dateFormat";
+import { getSheetsWebhookUrl } from "./userSettings";
+import type { EntryType, SheetsSyncStatus } from "./types";
 
+/** Payload sent to Google Apps Script webhook. */
 export type SheetsWebhookPayload = {
+  entryType: EntryType | string;
   date: string;
-  workerName: string;
   category: string;
-  amount: number;
-  paymentMethod: string;
-  note: string;
+  expenseAmount: number;
+  notes: string;
+  addOn: number;
+  source: string;
+  requestedBy: string;
+  approvedBy: string;
 };
 
 export type SheetsSyncResult = {
@@ -19,29 +25,71 @@ export type SheetsSyncResult = {
 };
 
 export function buildSheetsPayload(row: {
+  type: EntryType;
   date: string;
-  workerName: string;
-  category: string;
+  name: string;
+  category?: string;
   amount: number;
-  paymentMethod: string;
-  note: string;
+  method: string;
+  note?: string;
+  bankName?: string;
+  approvedBy?: string;
 }): SheetsWebhookPayload {
+  const absAmount = Math.abs(Number(row.amount) || 0);
+  let category = row.category?.trim() ?? "";
+  let expenseAmount = 0;
+  let addOn = 0;
+  let source = "";
+  let requestedBy = "";
+  let approvedBy = row.approvedBy?.trim() ?? "";
+
+  if (row.type === "expense") {
+    expenseAmount = absAmount;
+    requestedBy = row.name.trim();
+  } else if (row.type === "rotation_cash") {
+    if (row.amount > 0) {
+      addOn = row.amount;
+      source =
+        row.method === "Bank" && row.bankName?.trim()
+          ? `${row.method} - ${row.bankName.trim()}`
+          : row.method || "Cash";
+    } else {
+      expenseAmount = absAmount;
+      category = category || "Wallet Withdraw";
+    }
+  } else if (row.type === "worker_payment") {
+    expenseAmount = absAmount;
+    requestedBy = row.name.trim();
+  } else if (row.type === "adjustment") {
+    if (row.amount >= 0) {
+      addOn = row.amount;
+      source = "Adjustment";
+    } else {
+      expenseAmount = absAmount;
+      category = category || "Adjustment";
+    }
+  }
+
   return {
-    date: row.date,
-    workerName: row.workerName,
-    category: row.category,
-    amount: row.amount,
-    paymentMethod: row.paymentMethod,
-    note: row.note,
+    entryType: row.type,
+    date: formatIsoDateForSheet(row.date),
+    category,
+    expenseAmount,
+    notes: row.note?.trim() ?? "",
+    addOn,
+    source,
+    requestedBy,
+    approvedBy,
   };
 }
 
 export async function appendEntryToGoogleSheets(
-  payload: SheetsWebhookPayload
+  payload: SheetsWebhookPayload,
+  webhookUrl: string
 ): Promise<SheetsSyncResult> {
-  const webhook = process.env.GOOGLE_SHEETS_WEBHOOK_URL?.trim();
+  const webhook = webhookUrl.trim();
   if (!webhook) {
-    const error = "GOOGLE_SHEETS_WEBHOOK_URL is not configured";
+    const error = "Apps Script webhook URL is not configured for this account";
     console.error("[Google Sheets] request skipped:", error);
     return { ok: false, status: "failed", error };
   }
@@ -117,15 +165,19 @@ export async function syncEntryById(
   await markEntrySyncStatus(db, entryId, businessId, "pending");
 
   const payload = buildSheetsPayload({
+    type: entry.type as EntryType,
     date: entry.date as string,
-    workerName: entry.name as string,
+    name: entry.name as string,
     category: (entry.category as string) ?? "",
     amount: entry.amount as number,
-    paymentMethod: entry.method as string,
+    method: (entry.method as string) ?? "Cash",
     note: (entry.note as string) ?? "",
+    bankName: entry.bankName as string | undefined,
+    approvedBy: (entry.approvedBy as string) ?? "",
   });
 
-  const result = await appendEntryToGoogleSheets(payload);
+  const webhookUrl = (await getSheetsWebhookUrl(db, businessId)) ?? "";
+  const result = await appendEntryToGoogleSheets(payload, webhookUrl);
 
   if (result.ok) {
     await markEntrySyncStatus(db, entryId, businessId, "synced");

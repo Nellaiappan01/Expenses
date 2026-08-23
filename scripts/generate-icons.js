@@ -1,22 +1,48 @@
 const path = require("path");
+const fs = require("fs");
 const sharp = require("sharp");
 
 const publicDir = path.join(__dirname, "..", "public");
+const candidates = [
+  path.join(publicDir, "site-ledger-icon-source.png"),
+  path.join(publicDir, "site-ledger-icon-source.jpg"),
+];
 const sizes = [192, 512];
 
-// Create green rounded square matching icon.svg (#059669, rx 96 at 512px)
+function resolveSource() {
+  for (const file of candidates) {
+    if (fs.existsSync(file)) return file;
+  }
+  return null;
+}
+
 async function generate() {
+  const sourcePath = resolveSource();
+  if (!sourcePath) {
+    console.error(
+      "Missing public/site-ledger-icon-source.png (or .jpg) — add the Site Ledger icon image first."
+    );
+    process.exit(1);
+  }
+
+  console.log(`Using source: ${path.basename(sourcePath)}`);
+
   for (const size of sizes) {
-    const radius = Math.round((96 / 512) * size);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">
-      <rect width="${size}" height="${size}" rx="${radius}" fill="#059669"/>
-      <text x="${size/2}" y="${size * 0.66}" font-size="${size * 0.55}" font-weight="bold" fill="white" text-anchor="middle" font-family="system-ui,sans-serif">1</text>
-    </svg>`;
-    await sharp(Buffer.from(svg))
+    await sharp(sourcePath)
+      .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 1 } })
       .png()
       .toFile(path.join(publicDir, `icon-${size}.png`));
     console.log(`Generated icon-${size}.png`);
   }
+
+  await sharp(sourcePath)
+    .resize(180, 180, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 1 } })
+    .png()
+    .toFile(path.join(publicDir, "apple-touch-icon.png"));
+  console.log("Generated apple-touch-icon.png");
 }
 
-generate().catch(console.error);
+generate().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

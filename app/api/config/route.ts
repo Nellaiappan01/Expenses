@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { getUserSettings } from "@/lib/userSettings";
 
 const DEFAULT_CONFIG = {
   appMode: "expenses" as const,
@@ -17,10 +18,17 @@ export async function GET(request: NextRequest) {
     const userId = await getUserId(request);
     const db = await getDb();
     const config = await db.collection("config").findOne({ businessId: userId });
+    const settings = await getUserSettings(db, userId);
     const merged = {
       ...DEFAULT_CONFIG,
       ...config?.config,
       features: { ...DEFAULT_CONFIG.features, ...config?.config?.features },
+      branding: settings.branding,
+      integrations: {
+        googleSheetUrl: settings.integrations.googleSheetUrl,
+        appsScriptWebhookUrl: settings.integrations.appsScriptWebhookUrl,
+        hasAppsScriptWebhook: !!settings.integrations.appsScriptWebhookUrl,
+      },
     };
     return NextResponse.json(merged);
   } catch (error) {
@@ -61,7 +69,16 @@ export async function PATCH(request: NextRequest) {
       { upsert: true }
     );
 
-    return NextResponse.json(newConfig);
+    const settings = await getUserSettings(db, userId);
+    return NextResponse.json({
+      ...newConfig,
+      branding: settings.branding,
+      integrations: {
+        googleSheetUrl: settings.integrations.googleSheetUrl,
+        appsScriptWebhookUrl: settings.integrations.appsScriptWebhookUrl,
+        hasAppsScriptWebhook: !!settings.integrations.appsScriptWebhookUrl,
+      },
+    });
   } catch (error) {
     console.error("Config PATCH error:", error);
     return NextResponse.json({ error: "Failed to update config" }, { status: 500 });

@@ -4,24 +4,13 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
+import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
 import type { Entry } from "@/lib/types";
 import EditEntrySheet, { EditIcon, TrashIcon } from "./EditEntrySheet";
 import { useUser } from "../context/UserContext";
 
 function formatDate(isoDate: string) {
-  const d = new Date(isoDate.includes("T") ? isoDate : isoDate + "T12:00:00");
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return formatDateDDMMYYYY(d);
-}
-
-function formatAmount(amount: number) {
-  const sign = amount >= 0 ? "" : "-";
-  return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  return formatDateDDMMYYYY(isoDate);
 }
 
 export default function EntryList({
@@ -185,13 +174,9 @@ export default function EntryList({
                     </div>
                     <div className="ml-3 flex shrink-0 items-center gap-2">
                       <p
-                        className={`font-semibold tabular-nums ${
-                          entry.amount >= 0
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-red-600 dark:text-red-400"
-                        }`}
+                        className={`font-semibold tabular-nums ${entryAmountColorClass(entry)}`}
                       >
-                        {formatAmount(entry.amount)}
+                        {formatEntryAmount(entry.amount, entry.type)}
                       </p>
                       <svg
                         className={`h-5 w-5 text-zinc-400 transition-transform ${

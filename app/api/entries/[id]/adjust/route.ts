@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
+import { invalidateBalanceCache } from "@/lib/balance";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import {
@@ -128,6 +129,8 @@ export async function PATCH(
       return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
 
+    invalidateBalanceCache(userId);
+
     return NextResponse.json({
       ...result,
       _id: result._id?.toString(),
@@ -217,6 +220,8 @@ export async function DELETE(
     if (!result) {
       return NextResponse.json({ error: "Delete failed" }, { status: 500 });
     }
+
+    invalidateBalanceCache(userId);
 
     return NextResponse.json({
       ...result,

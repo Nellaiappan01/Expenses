@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/mongodb";
-
 import { publicSlugFromUserRecord } from "@/lib/publicStock";
+import { isCloudinaryConfigured, uploadUserBanner } from "@/lib/cloudinary";
+import {
+  ensureUserSettings,
+  saveUserSettings,
+  shortNameFromBusinessName,
+} from "@/lib/userSettings";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { username, password, name } = body;
+    const {
+      username,
+      password,
+      name,
+      businessName,
+      googleSheetUrl,
+      appsScriptWebhookUrl,
+      bannerImageData,
+    } = body;
 
     const userInput = (username || "").trim().toLowerCase();
     if (!userInput || !password) {
@@ -24,8 +37,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userId = userInput.replace(/\s+/g, "_");
     const displayName = (name || userInput).trim();
+    const appName = (businessName || displayName).trim();
+    if (!appName) {
+      return NextResponse.json({ error: "Business name is required" }, { status: 400 });
+    }
+
+    const userId = userInput.replace(/\s+/g, "_");
     const email = userInput.includes("@") ? userInput : undefined;
 
     const db = await getDb();
@@ -69,6 +87,32 @@ export async function POST(request: NextRequest) {
 
     const savedUser = await db.collection("users").findOne({ userId: existing?.userId ?? userId });
     const resolvedUserId = (savedUser?.userId as string) ?? userId;
+
+    let bannerUrl: string | undefined;
+    if (bannerImageData?.trim()) {
+      if (!isCloudinaryConfigured()) {
+        return NextResponse.json(
+          { error: "Cloudinary not configured. Cannot upload banner image." },
+          { status: 503 }
+        );
+      }
+      const uploaded = await uploadUserBanner(resolvedUserId, bannerImageData.trim());
+      bannerUrl = uploaded.url;
+    }
+
+    await saveUserSettings(db, resolvedUserId, {
+      branding: {
+        appName,
+        appShortName: shortNameFromBusinessName(appName),
+        ...(bannerUrl ? { bannerUrl } : {}),
+      },
+      integrations: {
+        googleSheetUrl: (googleSheetUrl || "").trim(),
+        appsScriptWebhookUrl: (appsScriptWebhookUrl || "").trim(),
+      },
+    });
+
+    await ensureUserSettings(db, resolvedUserId, userInput);
 
     const { createSession } = await import("@/lib/auth");
     const token = await createSession(resolvedUserId);

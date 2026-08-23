@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
 
     const csv = rows.join("\n");
     const bom = "\uFEFF";
-    const dateStr = formatDateDDMMYYYY(new Date()).replace(/:/g, "-");
+    const dateStr = formatDateDDMMYYYY(new Date());
     const filename = historyOnly
       ? `stock-history-${dateStr}.csv`
       : `stock-report-${dateStr}.csv`;

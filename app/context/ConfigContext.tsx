@@ -17,10 +17,24 @@ export type ConfigFeatures = {
   stock: boolean;
 };
 
+export type UserBranding = {
+  appName: string;
+  appShortName: string;
+  bannerUrl: string;
+};
+
+export type UserIntegrations = {
+  googleSheetUrl: string;
+  appsScriptWebhookUrl: string;
+  hasAppsScriptWebhook?: boolean;
+};
+
 type ConfigContextType = {
   config: {
     appMode: string;
     features: ConfigFeatures & { user_delete?: boolean };
+    branding?: UserBranding;
+    integrations?: UserIntegrations;
   } | null;
   refresh: () => void;
 };

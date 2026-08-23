@@ -3,10 +3,18 @@ import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import { ensureWorkerCategory, ensureWorkerName } from "@/lib/defaultsHelpers";
 import {
+  ensureApproverName,
+  ensureExpenseCategory,
+  ensureExpenseName,
+  ensureExpenseTag,
+} from "@/lib/expenseDefaultsHelpers";
+import {
   appendEntryToGoogleSheets,
   buildSheetsPayload,
   markEntrySyncStatus,
 } from "@/lib/googleSheetsSync";
+import { invalidateBalanceCache } from "@/lib/balance";
+import { getSheetsWebhookUrl } from "@/lib/userSettings";
 import type { Entry, EntryInput } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
@@ -21,19 +29,30 @@ export async function POST(request: NextRequest) {
       bankName,
       sender,
       category,
-      type = "worker_payment",
+      approvedBy,
+      attachmentUrl,
+      attachmentPublicId,
+      tags,
+      type = "expense",
     } = body;
 
     if (!name?.trim()) {
       const label =
-        type === "rotation_cash" ? "Description is required" : "Worker name is required";
+        type === "rotation_cash"
+          ? "Description is required"
+          : type === "expense"
+            ? "Requested by is required"
+            : "Worker name is required";
       return NextResponse.json({ error: label }, { status: 400 });
     }
     if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
       return NextResponse.json({ error: "Amount is required" }, { status: 400 });
     }
-    if (type === "worker_payment" && !category?.trim()) {
+    if ((type === "worker_payment" || type === "expense") && !category?.trim()) {
       return NextResponse.json({ error: "Category is required" }, { status: 400 });
+    }
+    if (type === "expense" && !approvedBy?.trim()) {
+      return NextResponse.json({ error: "Approved by is required" }, { status: 400 });
     }
 
     const userId = await getUserId(request);
@@ -46,7 +65,21 @@ export async function POST(request: NextRequest) {
       ]);
     }
 
+    if (type === "expense") {
+      const tagList = Array.isArray(tags) ? tags.filter((t) => t?.trim()) : [];
+      await Promise.all([
+        ensureExpenseName(db, userId, name),
+        ensureApproverName(db, userId, approvedBy!.trim()),
+        ensureExpenseCategory(db, userId, category!.trim()),
+        ...tagList.map((tag) => ensureExpenseTag(db, userId, tag)),
+      ]);
+    }
+
     const createdAt = new Date();
+    const normalizedTags = Array.isArray(tags)
+      ? tags.map((t) => t.trim()).filter(Boolean)
+      : undefined;
+
     const entry: Omit<Entry, "_id"> = {
       type,
       name: name.trim(),
@@ -58,6 +91,11 @@ export async function POST(request: NextRequest) {
       note: note?.trim() || undefined,
       bankName: bankName?.trim() || undefined,
       sender: sender?.trim() || undefined,
+      approvedBy: approvedBy?.trim() || undefined,
+      approvedByLower: approvedBy?.trim().toLowerCase(),
+      attachmentUrl: attachmentUrl?.trim() || undefined,
+      attachmentPublicId: attachmentPublicId?.trim() || undefined,
+      tags: normalizedTags?.length ? normalizedTags : undefined,
       businessId: userId,
       createdAt,
       sheetsSyncStatus: "pending",
@@ -65,18 +103,25 @@ export async function POST(request: NextRequest) {
 
     const result = await db.collection("entries").insertOne(entry);
     const entryId = result.insertedId.toString();
+    invalidateBalanceCache(userId);
     console.info("[Entries] database save ok:", entryId);
 
     const payload = buildSheetsPayload({
+      type: entry.type,
       date: entry.date,
-      workerName: entry.name,
+      name: entry.name,
       category: entry.category ?? "",
       amount: entry.amount,
-      paymentMethod: entry.method,
+      method: entry.method,
       note: entry.note ?? "",
+      bankName: entry.bankName,
+      approvedBy: entry.approvedBy ?? "",
     });
 
-    const sheetsResult = await appendEntryToGoogleSheets(payload);
+    const sheetsResult = await appendEntryToGoogleSheets(
+      payload,
+      (await getSheetsWebhookUrl(db, userId)) ?? ""
+    );
 
     if (sheetsResult.ok) {
       await markEntrySyncStatus(db, entryId, userId, "synced");

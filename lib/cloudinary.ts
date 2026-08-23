@@ -48,6 +48,84 @@ export async function uploadStockImage(
   };
 }
 
+export async function uploadExpenseAttachment(
+  userId: string,
+  imageData: string | Buffer,
+  entryId?: string
+): Promise<{ url: string; publicId: string }> {
+  const cld = getCloudinary();
+  const suffix = entryId ?? `${Date.now()}`;
+
+  const result = await cld.uploader.upload(
+    typeof imageData === "string" ? imageData : `data:image/jpeg;base64,${imageData.toString("base64")}`,
+    {
+      folder: `expenses/${userId}`,
+      public_id: suffix,
+      overwrite: true,
+      resource_type: "image",
+      invalidate: true,
+    }
+  );
+
+  return {
+    url: result.secure_url,
+    publicId: result.public_id,
+  };
+}
+
+export async function uploadFromRemoteUrl(
+  userId: string,
+  remoteUrl: string,
+  entryId?: string
+): Promise<{ url: string; publicId: string }> {
+  const cld = getCloudinary();
+  const suffix = entryId ?? `${Date.now()}`;
+  const result = await cld.uploader.upload(remoteUrl, {
+    folder: `expenses/${userId}`,
+    public_id: suffix,
+    overwrite: true,
+    resource_type: "image",
+    invalidate: true,
+  });
+  return {
+    url: result.secure_url,
+    publicId: result.public_id,
+  };
+}
+
+export async function uploadUserBanner(
+  userId: string,
+  imageData: string | Buffer
+): Promise<{ url: string; publicId: string }> {
+  const cld = getCloudinary();
+  const result = await cld.uploader.upload(
+    typeof imageData === "string" ? imageData : `data:image/jpeg;base64,${imageData.toString("base64")}`,
+    {
+      folder: `branding/${userId}`,
+      public_id: "header-banner",
+      overwrite: true,
+      resource_type: "image",
+      invalidate: true,
+    }
+  );
+  return { url: result.secure_url, publicId: result.public_id };
+}
+
+export async function uploadBrandAsset(
+  filePath: string,
+  publicId: string
+): Promise<{ url: string; publicId: string }> {
+  const cld = getCloudinary();
+  const result = await cld.uploader.upload(filePath, {
+    folder: "hariharan",
+    public_id: publicId,
+    overwrite: true,
+    resource_type: "image",
+    invalidate: true,
+  });
+  return { url: result.secure_url, publicId: result.public_id };
+}
+
 export async function deleteStockImage(publicId: string | undefined): Promise<void> {
   if (!publicId || !isCloudinaryConfigured()) return;
   const cld = getCloudinary();

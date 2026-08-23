@@ -28,14 +28,20 @@ export function entryAmountColorClass(entry: EntryListItem): string {
 
   switch (entry.type) {
     case "rotation_cash":
-      return entry.amount >= 0 ? "text-blue-600" : "text-red-600";
+      return entry.amount >= 0
+        ? "text-[#0B4A8C] dark:text-sky-400"
+        : "text-red-600 dark:text-red-400";
     case "adjustment":
-      return "text-amber-500";
+      return entry.amount >= 0
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-red-600 dark:text-red-400";
     case "expense":
     case "worker_payment":
-      return "text-red-600";
+      return "text-emerald-600 dark:text-emerald-400";
     default:
-      return entry.amount >= 0 ? "text-blue-600" : "text-red-600";
+      return entry.amount >= 0
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "text-red-600 dark:text-red-400";
   }
 }
 

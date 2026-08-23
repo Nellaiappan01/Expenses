@@ -12,16 +12,22 @@ export function addLocalDays(d: Date, deltaDays: number): Date {
   return copy;
 }
 
-/**
- * Global date format: DD/MM/YYYY
- */
-export function formatDateDDMMYYYY(date: Date | string): string {
-  const d = typeof date === "string" ? new Date(date.includes("T") ? date : date + "T12:00:00") : date;
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${day}:${month}:${year}`;
-}
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+const MONTH_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
 
 const MONTH_NAMES = [
   "January",
@@ -38,26 +44,62 @@ const MONTH_NAMES = [
   "December",
 ] as const;
 
-/** e.g. 04 April (for stock in/out rows) */
-export function formatDayMonthName(date: Date | string): string {
+function parseLocalDate(date: Date | string): Date | null {
   const d =
     typeof date === "string"
-      ? new Date(date.includes("T") ? date : date + "T12:00:00")
+      ? new Date(date.includes("T") ? date : `${date.trim()}T12:00:00`)
       : date;
-  if (Number.isNaN(d.getTime())) return "";
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export type FormatDateOptions = {
+  /** Include weekday prefix (Mon). Default true. */
+  weekday?: boolean;
+};
+
+/**
+ * Preferred format: Mon 16 Jun 2026
+ * Without weekday: 16 Jun 2026
+ */
+export function formatDateDisplay(
+  date: Date | string,
+  options: FormatDateOptions = {}
+): string {
+  const d = parseLocalDate(date);
+  if (!d) return "";
+
+  const weekday = options.weekday !== false;
+  const day = d.getDate();
+  const month = MONTH_SHORT[d.getMonth()];
+  const year = d.getFullYear();
+
+  if (weekday) {
+    return `${WEEKDAY_SHORT[d.getDay()]} ${day} ${month} ${year}`;
+  }
+  return `${day} ${month} ${year}`;
+}
+
+/** App-wide date display (alias). e.g. Mon 16 Jun 2026 */
+export function formatDateDDMMYYYY(date: Date | string): string {
+  return formatDateDisplay(date);
+}
+
+/** Google Sheets & exports — same readable format. */
+export function formatIsoDateForSheet(isoDate: string): string {
+  return formatDateDisplay(isoDate);
+}
+
+/** e.g. 04 April (for stock in/out rows) */
+export function formatDayMonthName(date: Date | string): string {
+  const d = parseLocalDate(date);
+  if (!d) return "";
   const day = String(d.getDate()).padStart(2, "0");
   return `${day} ${MONTH_NAMES[d.getMonth()]}`;
 }
 
-/** e.g. 06 April 2026 (Excel / report export) */
+/** e.g. 16 Jun 2026 (Excel / report export) */
 export function formatDayMonthYear(date: Date | string): string {
-  const d =
-    typeof date === "string"
-      ? new Date(date.includes("T") ? date : date + "T12:00:00")
-      : date;
-  if (Number.isNaN(d.getTime())) return "";
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${day} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+  return formatDateDisplay(date, { weekday: false });
 }
 
 /** Local time HH:MM for a transaction row */
@@ -69,11 +111,10 @@ export function formatTimeHHMM(date: Date | string): string {
   return `${hours}:${mins}`;
 }
 
-/** With optional time for datetime values */
+/** e.g. Mon 16 Jun 2026 14:30 */
 export function formatDateTimeDDMMYYYY(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  const datePart = formatDateDDMMYYYY(d);
-  const hours = String(d.getHours()).padStart(2, "0");
-  const mins = String(d.getMinutes()).padStart(2, "0");
-  return `${datePart} ${hours}:${mins}`;
+  if (Number.isNaN(d.getTime())) return "";
+  const datePart = formatDateDisplay(d);
+  return `${datePart} ${formatTimeHHMM(d)}`;
 }

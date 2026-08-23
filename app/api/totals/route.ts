@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { buildTotalsBreakdown, EMPTY_TOTALS } from "@/lib/totals";
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,46 +19,64 @@ export async function GET(request: NextRequest) {
       if (to) (match.date as Record<string, string>).$lte = to;
     }
 
-    const result = await db
+    const [row] = await db
       .collection("entries")
-      .aggregate<{ _id: string; total: number }>([
+      .aggregate<{
+        walletIn: number;
+        walletOut: number;
+        expense: number;
+        workerPayment: number;
+        adjustment: number;
+      }>([
         { $match: match },
-        { $group: { _id: "$type", total: { $sum: "$amount" } } },
+        {
+          $group: {
+            _id: null,
+            walletIn: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $eq: ["$type", "rotation_cash"] }, { $gt: ["$amount", 0] }] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            walletOut: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $eq: ["$type", "rotation_cash"] }, { $lt: ["$amount", 0] }] },
+                  { $abs: "$amount" },
+                  0,
+                ],
+              },
+            },
+            expense: {
+              $sum: {
+                $cond: [{ $eq: ["$type", "expense"] }, "$amount", 0],
+              },
+            },
+            workerPayment: {
+              $sum: {
+                $cond: [{ $eq: ["$type", "worker_payment"] }, "$amount", 0],
+              },
+            },
+            adjustment: {
+              $sum: {
+                $cond: [{ $eq: ["$type", "adjustment"] }, "$amount", 0],
+              },
+            },
+          },
+        },
       ])
       .toArray();
 
-    const totals = {
-      rotationCash: 0,
-      expense: 0,
-      workerPayment: 0,
-      adjustment: 0,
-      received: 0,
-      paid: 0,
-      net: 0,
-    };
-
-    for (const row of result) {
-      if (row._id === "rotation_cash") totals.rotationCash = row.total;
-      else if (row._id === "expense") totals.expense = row.total;
-      else if (row._id === "worker_payment") totals.workerPayment = row.total;
-      else if (row._id === "adjustment") totals.adjustment = row.total;
+    if (!row) {
+      return NextResponse.json(EMPTY_TOTALS);
     }
 
-    totals.received = totals.rotationCash;
-    totals.paid = totals.expense + totals.workerPayment;
-    totals.net = totals.received - totals.paid + totals.adjustment;
-
-    return NextResponse.json(totals);
+    return NextResponse.json(buildTotalsBreakdown(row));
   } catch (error) {
     console.error("Error fetching totals:", error);
-    return NextResponse.json({
-      rotationCash: 0,
-      expense: 0,
-      workerPayment: 0,
-      adjustment: 0,
-      received: 0,
-      paid: 0,
-      net: 0,
-    });
+    return NextResponse.json(EMPTY_TOTALS);
   }
 }

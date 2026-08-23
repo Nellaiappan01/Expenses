@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/mongodb";
 import { createSession } from "@/lib/auth";
 import { publicSlugFromUserRecord } from "@/lib/publicStock";
+import { ensureUserSettings } from "@/lib/userSettings";
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,6 +45,8 @@ export async function POST(request: NextRequest) {
     }
 
     const token = await createSession(user.userId);
+
+    await ensureUserSettings(db, user.userId as string, user.username as string | undefined);
 
     return NextResponse.json({
       token,

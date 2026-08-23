@@ -148,7 +148,11 @@ export default function Navbar() {
               key={href}
               href={href}
               className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2.5 min-h-[60px] transition-colors touch-manipulation select-none ${
-                active ? "text-emerald-600" : "text-zinc-500 active:text-zinc-700"
+                active
+                  ? useStockBar
+                    ? "text-emerald-600"
+                    : "text-[#0B4A8C]"
+                  : "text-zinc-500 active:text-zinc-700"
               }`}
             >
               <Icon active={active} />

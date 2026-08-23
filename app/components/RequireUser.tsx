@@ -9,7 +9,11 @@ const USER_KEY = "ledger_user_id";
 export default function RequireUser({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [checked, setChecked] = useState(false);
+  const [checked, setChecked] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (pathname === "/select-user" || isPublicRoute(pathname)) return true;
+    return !!localStorage.getItem(USER_KEY);
+  });
 
   useEffect(() => {
     if (pathname === "/select-user" || isPublicRoute(pathname)) {

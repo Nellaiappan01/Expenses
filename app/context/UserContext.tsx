@@ -11,6 +11,22 @@ import {
 
 const USER_KEY = "ledger_user_id";
 
+function readStoredUser() {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = localStorage.getItem(USER_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as {
+      userId?: string;
+      userName?: string;
+      username?: string;
+      isAdmin?: boolean;
+    };
+  } catch {
+    return null;
+  }
+}
+
 type UserContextType = {
   userId: string | null;
   userName: string | null;
@@ -30,26 +46,23 @@ type UserContextType = {
 const UserContext = createContext<UserContextType | null>(null);
 
 export function UserProvider({ children }: { children: ReactNode }) {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const stored = readStoredUser();
+  const [userId, setUserId] = useState<string | null>(stored?.userId ?? null);
+  const [userName, setUserName] = useState<string | null>(
+    stored?.userName || stored?.userId || null
+  );
+  const [username, setUsername] = useState<string | null>(
+    stored?.username || stored?.userId || null
+  );
+  const [isAdmin, setIsAdmin] = useState(!!stored?.isAdmin);
 
   useEffect(() => {
-    const stored = localStorage.getItem(USER_KEY);
-    if (stored) {
-      try {
-        const data = JSON.parse(stored);
-        setUserId(data.userId);
-        setUserName(data.userName || data.userId);
-        setUsername(data.username || data.userId);
-        setIsAdmin(!!data.isAdmin);
-      } catch {
-        localStorage.removeItem(USER_KEY);
-      }
-    }
-    setMounted(true);
+    const data = readStoredUser();
+    if (!data) return;
+    setUserId(data.userId ?? null);
+    setUserName(data.userName || data.userId || null);
+    setUsername(data.username || data.userId || null);
+    setIsAdmin(!!data.isAdmin);
   }, []);
 
   const setUser = useCallback((data: {
@@ -107,7 +120,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   return (
     <UserContext.Provider value={value}>
-      {mounted ? children : null}
+      {children}
     </UserContext.Provider>
   );
 }

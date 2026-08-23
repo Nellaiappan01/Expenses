@@ -16,13 +16,28 @@ function getDateRange(preset: "today" | "week" | "month") {
   return { from: from.toISOString().split("T")[0], to };
 }
 
+function fieldClass() {
+  return "w-full rounded-xl border border-[#D6E6F5] bg-[#F8FBFE] px-3 py-2.5 text-sm text-[#0B4A8C] outline-none placeholder:text-[#9BB5CC] focus:border-[#0B4A8C] focus:bg-white [font-size:16px]";
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]">
+      {children}
+    </label>
+  );
+}
+
 export default function ReportPage() {
   const router = useRouter();
   const { config } = useConfig() ?? {};
+  const businessLabel = config?.branding?.appName || "Your business";
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [activePreset, setActivePreset] = useState<"today" | "week" | "month" | null>(null);
 
   useEffect(() => {
     const features = config?.features ?? { expenses: false, workers: false, stock: false };
@@ -35,158 +50,166 @@ export default function ReportPage() {
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   if (config && !features.expenses && !features.workers && !features.stock) return null;
   const hasLedger = features.expenses || features.workers;
-  const showDateRange = hasLedger || features.stock;
 
   function setDatePreset(preset: "today" | "week" | "month") {
     const { from: f, to: t } = getDateRange(preset);
     setFrom(f);
     setTo(t);
+    setActivePreset(preset);
   }
 
   async function downloadReport() {
     setLoading(true);
+    setError("");
     try {
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       if (search.trim()) params.set("search", search.trim());
       const res = await apiFetch(`/api/export/report?${params}`);
-      if (!res.ok) throw new Error("Export failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Export failed");
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `report-${new Date().toISOString().split("T")[0]}.xlsx`;
+      const suffix = from && to ? `${from}_to_${to}` : new Date().toISOString().split("T")[0];
+      a.download = `ledger-${suffix}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error(err);
+      setError(err instanceof Error ? err.message : "Download failed. Try again.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">
-      <div className="mx-auto max-w-md px-4 py-6 pb-24 sm:px-5">
-        <header className="mb-6 flex items-center gap-3">
+    <div className="min-h-screen bg-[#F4F8FC]">
+      <div className="mx-auto max-w-md px-4 py-6 pb-28">
+        <header className="mb-5 flex items-center gap-3">
           <Link
             href="/"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#D6E6F5] bg-white text-[#0B4A8C] shadow-sm"
             aria-label="Back"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </Link>
-          <div>
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
-              Report
-            </h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Excel for Google Sheets · dates like 06 April 2026
-            </p>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-bold text-[#0B4A8C]">Report</h1>
+            <p className="truncate text-sm text-[#5A7FA5]">{businessLabel}</p>
+          </div>
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#E8F2FA] text-[#0B4A8C]"
+            aria-hidden
+          >
+            <ExcelIcon className="h-5 w-5" />
           </div>
         </header>
 
-        <div className="space-y-6">
-          {showDateRange && (
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Date range (optional)
-            </h2>
-            <div className="mb-3 flex flex-wrap gap-2">
+        <div className="rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm">
+          <div className="mb-4 flex flex-wrap gap-2">
+            {(
+              [
+                ["today", "Today"],
+                ["week", "7 days"],
+                ["month", "30 days"],
+              ] as const
+            ).map(([key, label]) => (
               <button
+                key={key}
                 type="button"
-                onClick={() => setDatePreset("today")}
-                className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                onClick={() => setDatePreset(key)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activePreset === key
+                    ? "bg-[#0B4A8C] text-white"
+                    : "bg-[#F8FBFE] text-[#0B4A8C]"
+                }`}
               >
-                Today
+                {label}
               </button>
-              <button
-                type="button"
-                onClick={() => setDatePreset("week")}
-                className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-              >
-                Last 7 days
-              </button>
-              <button
-                type="button"
-                onClick={() => setDatePreset("month")}
-                className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-              >
-                Last 30 days
-              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <FieldLabel>From</FieldLabel>
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setActivePreset(null);
+                }}
+                className={fieldClass()}
+              />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">From</label>
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="mb-0.5 block text-xs text-zinc-500 dark:text-zinc-400">To</label>
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-                />
-              </div>
+            <div>
+              <FieldLabel>To</FieldLabel>
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  setActivePreset(null);
+                }}
+                className={fieldClass()}
+              />
             </div>
           </div>
-          )}
 
           {hasLedger && (
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="mb-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Search (optional)
-            </h2>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter by name or note..."
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
-            />
-          </div>
+            <div className="mt-3">
+              <FieldLabel>Search</FieldLabel>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Optional — name, category, note…"
+                className={fieldClass()}
+              />
+            </div>
           )}
 
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={downloadReport}
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {loading ? (
-                "Preparing…"
-              ) : (
-                <>
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Download Excel
-                </>
-              )}
-            </button>
-            {features.stock && (
-              <p className="text-center text-xs text-zinc-600 dark:text-zinc-400">
-                Stock sheets: Godown Stock · Stock In · Stock Out · Claim
-              </p>
-            )}
-            <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-              Opens in Excel or Google Sheets.
-              {hasLedger && " Date range applies to ledger & stock movements."}
-              {features.stock && !hasLedger && " Date range applies to stock in, out & claims."}
+          {error && (
+            <p className="mt-3 text-sm text-red-600" role="alert">
+              {error}
             </p>
-          </div>
+          )}
+
+          <button
+            type="button"
+            onClick={downloadReport}
+            disabled={loading}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4A8C] py-3.5 text-base font-bold text-white hover:bg-[#083A6E] disabled:opacity-60"
+          >
+            <ExcelIcon className="h-5 w-5" />
+            {loading ? "Preparing…" : "Download Excel"}
+          </button>
+
+          <p className="mt-3 text-center text-[11px] text-[#9BB5CC]">
+            Ledger with opening & closing balance · Mon 16 Jun 2026
+          </p>
         </div>
       </div>
     </div>
+  );
+}
+
+function ExcelIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.75}
+        d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V9l-5-6z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M14 3v6h6M8 13h8M8 17h5" />
+    </svg>
   );
 }

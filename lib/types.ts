@@ -15,6 +15,11 @@ export interface Entry {
   note?: string;
   bankName?: string;
   sender?: string;
+  approvedBy?: string;
+  approvedByLower?: string;
+  attachmentUrl?: string;
+  attachmentPublicId?: string;
+  tags?: string[];
   businessId: string;
   createdAt: Date;
   sheetsSyncStatus?: SheetsSyncStatus;
@@ -51,4 +56,8 @@ export interface EntryInput {
   note?: string;
   bankName?: string;
   sender?: string;
+  approvedBy?: string;
+  attachmentUrl?: string;
+  attachmentPublicId?: string;
+  tags?: string[];
 }

@@ -8,6 +8,7 @@ import PwaProvider from "./components/PwaProvider";
 import RequireUser from "./components/RequireUser";
 import { ConfigProvider } from "./context/ConfigContext";
 import { UserProvider } from "./context/UserContext";
+import { APP_NAME, APP_SHORT_NAME } from "@/lib/brandAssets";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,19 +21,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cash Flow Ledger",
-  description: "Track expenses and payments",
+  title: APP_NAME,
+  description: "Site expense entry, wallet tracking and Google Sheets sync",
   icons: {
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/icon-192.png",
+    apple: "/apple-touch-icon.png",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Ledger",
+    title: APP_SHORT_NAME,
   },
 };
 
@@ -40,7 +41,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#059669",
+  themeColor: "#0B4A8C",
 };
 
 export default function RootLayout({

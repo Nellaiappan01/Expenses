@@ -7,6 +7,7 @@ import { useConfig } from "../context/ConfigContext";
 import { useUser } from "../context/UserContext";
 import { apiFetch } from "@/lib/api";
 import { isPublicRoute } from "@/lib/publicRoutes";
+import { APP_NAME } from "@/lib/brandAssets";
 
 function getTodayHref() {
   const today = new Date().toISOString().split("T")[0];
@@ -22,6 +23,7 @@ const baseNavItems = [
   { href: "/stock/orders", label: "Claim list", icon: OrdersIcon, feature: "stock" as const },
   { href: "/stock/dashboard", label: "Dashboard", icon: DashboardIcon, feature: "stock" as const },
   { href: "/defaults", label: "Defaults", icon: SettingsIcon, ledger: true },
+  { href: "/settings", label: "Account & Sheet", icon: SettingsIcon, ledger: true },
 ];
 const adminNavItem = { href: "/admin", label: "Admin", icon: SettingsIcon };
 
@@ -116,7 +118,9 @@ export default function AppHeader() {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const { config } = useConfig() ?? {};
-  const { userName, isAdmin, clearUser } = useUser();
+  const { isAdmin, clearUser } = useUser();
+
+  const appTitle = config?.branding?.appName || APP_NAME;
 
   async function handleLogout() {
     setMenuOpen(false);
@@ -132,22 +136,18 @@ export default function AppHeader() {
 
   if (pathname === "/select-user" || isPublicRoute(pathname)) return null;
 
+  if (pathname === "/") return null;
+
   const isActive = (href: string) =>
     pathname === href || (href !== "/" && pathname.startsWith(href));
 
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-40 flex min-h-16 items-center justify-between gap-2 border-b border-zinc-200/80 bg-white/95 px-4 py-2 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-900/95 pt-[env(safe-area-inset-top)]">
-        <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
+        <div className="flex min-w-0 flex-1 items-center py-1">
           <h1 className="truncate text-base font-semibold leading-tight text-zinc-900 dark:text-zinc-100">
-            Cash Flow Ledger
+            {appTitle}
           </h1>
-          <Link
-            href="/select-user"
-            className="truncate text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-          >
-            {userName || "Switch User"}
-          </Link>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -225,6 +225,14 @@ export default function AppHeader() {
                     </Link>
                   );
                 })}
+                <Link
+                  href="/select-user"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-4 rounded-xl px-4 py-3.5 min-h-[48px] text-zinc-700 transition-colors active:scale-[0.98] active:bg-zinc-100 dark:text-zinc-300 dark:active:bg-zinc-800"
+                >
+                  <SettingsIcon />
+                  <span className="font-medium">Switch account</span>
+                </Link>
                 <button
                   type="button"
                   onClick={handleLogout}

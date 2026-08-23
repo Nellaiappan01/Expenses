@@ -2,20 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
-import { formatDayMonthYear } from "@/lib/dateFormat";
+import { formatIsoDateForSheet } from "@/lib/dateFormat";
+import { APP_NAME } from "@/lib/brandAssets";
+import { buildLedgerRows, sortEntriesChronologically, sumBalanceDeltas } from "@/lib/ledgerExport";
+import { SHEET_COLUMN_PATTERN } from "@/lib/userSettings";
 import type { Entry } from "@/lib/types";
 
 const DEFAULT_CONFIG = {
   features: { expenses: true, workers: true, stock: false },
 };
 
-/** e.g. 06 April 2026 for Excel / Google Sheets (text cells). */
+/** e.g. Mon 16 Jun 2026 for Excel / Google Sheets (text cells). */
 function exportDate(value: unknown): string {
   if (value == null || value === "") return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-    return formatDayMonthYear(`${value.trim()}T12:00:00`);
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    return formatIsoDateForSheet(`${y}-${m}-${d}`);
   }
-  return formatDayMonthYear(value as Date | string);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return formatIsoDateForSheet(value.trim());
+  }
+  if (typeof value === "string") {
+    return formatIsoDateForSheet(value);
+  }
+  return "";
 }
 
 function movementDateFilter(
@@ -42,8 +54,38 @@ function claimCreatedFilter(
 
 function styleHeader(ws: ExcelJS.Worksheet) {
   const row = ws.getRow(1);
-  row.font = { bold: true };
+  row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  row.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF0B4A8C" },
+  };
   row.alignment = { vertical: "middle", wrapText: true };
+}
+
+function styleCurrencyColumns(ws: ExcelJS.Worksheet, columns: number[]) {
+  for (let r = 2; r <= ws.rowCount; r++) {
+    for (const col of columns) {
+      const cell = ws.getRow(r).getCell(col);
+      if (typeof cell.value === "number") {
+        cell.numFmt = "#,##0.00";
+      }
+    }
+  }
+}
+
+function buildEntrySearchFilter(search: string) {
+  const searchLower = search.toLowerCase();
+  return {
+    $or: [
+      { nameLower: { $regex: searchLower, $options: "i" } },
+      { note: { $regex: search, $options: "i" } },
+      { category: { $regex: search, $options: "i" } },
+      { approvedByLower: { $regex: searchLower, $options: "i" } },
+      { sender: { $regex: search, $options: "i" } },
+      { bankName: { $regex: search, $options: "i" } },
+    ],
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -65,48 +107,95 @@ export async function GET(request: NextRequest) {
     const features = config.features ?? DEFAULT_CONFIG.features;
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Cash Flow Ledger";
+    workbook.creator = APP_NAME;
     workbook.created = new Date();
     const dateStr = new Date().toISOString().split("T")[0];
 
-    const entryMatch: Record<string, unknown> = { businessId: userId };
+    const entryMatch: Record<string, unknown> = {
+      businessId: userId,
+      deleted: { $ne: true },
+    };
     if (from || to) {
       entryMatch.date = {};
       if (from) (entryMatch.date as Record<string, string>).$gte = from;
       if (to) (entryMatch.date as Record<string, string>).$lte = to;
     }
     if (search) {
-      const searchLower = search.toLowerCase();
-      entryMatch.$or = [
-        { nameLower: { $regex: searchLower, $options: "i" } },
-        { note: { $regex: search, $options: "i" } },
-      ];
+      Object.assign(entryMatch, buildEntrySearchFilter(search));
+    }
+
+    const ledgerTypes: Entry["type"][] = [];
+    if (features.expenses) {
+      ledgerTypes.push("expense", "rotation_cash", "adjustment");
+    }
+    if (features.workers) {
+      ledgerTypes.push("worker_payment");
     }
 
     let walletTotal = 0;
     let expenseTotal = 0;
     let workerTotal = 0;
+    let startingBalance = 0;
+    let closingBalance = 0;
 
-    if (features.expenses) {
-      const [expenseEntries, walletEntries] = await Promise.all([
-        db
+    if (ledgerTypes.length > 0) {
+      if (from) {
+        const priorEntries = await db
           .collection<Entry>("entries")
-          .find({ ...entryMatch, type: { $in: ["expense", "adjustment"] as const } })
-          .toArray(),
-        db
-          .collection<Entry>("entries")
-          .find({ ...entryMatch, type: "rotation_cash" as const })
-          .toArray(),
-      ]);
-      expenseTotal = expenseEntries.reduce((s, e) => s + e.amount, 0);
-      walletTotal = walletEntries.reduce((s, e) => s + e.amount, 0);
-    }
-    if (features.workers) {
-      const workerEntries = await db
+          .find({
+            businessId: userId,
+            deleted: { $ne: true },
+            type: { $in: ledgerTypes },
+            date: { $lt: from },
+          })
+          .toArray();
+        startingBalance = sumBalanceDeltas(priorEntries);
+      }
+
+      const ledgerEntries = await db
         .collection<Entry>("entries")
-        .find({ ...entryMatch, type: "worker_payment" as const })
+        .find({ ...entryMatch, type: { $in: ledgerTypes } })
         .toArray();
-      workerTotal = workerEntries.reduce((s, e) => s + e.amount, 0);
+
+      const ledgerRows = buildLedgerRows(ledgerEntries, startingBalance);
+
+      const ledgerWs = workbook.addWorksheet("Ledger", {
+        views: [{ state: "frozen", ySplit: 1 }],
+      });
+      ledgerWs.columns = [
+        { header: "Date", key: "date", width: 16 },
+        { header: "Opening Balance", key: "openingBalance", width: 16 },
+        { header: "Category", key: "category", width: 18 },
+        { header: "Expenses Amount", key: "expensesAmount", width: 16 },
+        { header: "Notes", key: "notes", width: 28 },
+        { header: "Add on", key: "addOn", width: 14 },
+        { header: "Source", key: "source", width: 18 },
+        { header: "Closing Balance", key: "closingBalance", width: 16 },
+        { header: "Requested by", key: "requestedBy", width: 18 },
+        { header: "Approved by", key: "approvedBy", width: 18 },
+      ];
+      styleHeader(ledgerWs);
+      for (const row of ledgerRows) {
+        ledgerWs.addRow(row);
+      }
+      styleCurrencyColumns(ledgerWs, [2, 4, 6, 8]);
+
+      if (ledgerRows.length > 0) {
+        closingBalance = ledgerRows[ledgerRows.length - 1].closingBalance;
+        const totalRow = ledgerWs.addRow({
+          date: "Closing balance",
+          closingBalance,
+        });
+        totalRow.font = { bold: true };
+        styleCurrencyColumns(ledgerWs, [8]);
+      }
+
+      const sortedForTotals = sortEntriesChronologically(ledgerEntries);
+      for (const e of sortedForTotals) {
+        if (e.type === "rotation_cash") walletTotal += e.amount;
+        else if (e.type === "expense" || e.type === "adjustment") expenseTotal += e.amount;
+        else if (e.type === "worker_payment") workerTotal += e.amount;
+      }
     }
 
     if (features.expenses || features.workers) {
@@ -114,134 +203,24 @@ export async function GET(request: NextRequest) {
         views: [{ state: "frozen", ySplit: 1 }],
       });
       summaryWs.columns = [
-        { header: "Section", key: "label", width: 22 },
+        { header: "Section", key: "label", width: 28 },
         { header: "Amount (₹)", key: "amount", width: 18 },
       ];
       styleHeader(summaryWs);
-      summaryWs.addRow({ label: "Wallet Total", amount: walletTotal });
-      summaryWs.addRow({ label: "Expenses Total", amount: expenseTotal });
-      summaryWs.addRow({ label: "Workers Total", amount: workerTotal });
+      summaryWs.addRow({ label: "Wallet net (add − withdraw)", amount: walletTotal });
+      summaryWs.addRow({ label: "Expenses & adjustments", amount: expenseTotal });
+      if (features.workers) {
+        summaryWs.addRow({ label: "Worker payments", amount: workerTotal });
+      }
       summaryWs.addRow([]);
-      const currentValue = walletTotal - Math.abs(expenseTotal) - Math.abs(workerTotal);
-      summaryWs.addRow({ label: "Current Value", amount: currentValue });
+      summaryWs.addRow({ label: "Closing balance", amount: closingBalance });
       summaryWs.getRow(summaryWs.rowCount).font = { bold: true };
+      summaryWs.addRow([]);
+      summaryWs.addRow({ label: "Columns", amount: "" });
+      summaryWs.addRow({ label: SHEET_COLUMN_PATTERN, amount: "" });
     }
 
-    if (features.expenses) {
-      const expenseMatch = {
-        ...entryMatch,
-        type: { $in: ["expense", "adjustment"] as const },
-      };
-      const entries = await db
-        .collection<Entry>("entries")
-        .find(expenseMatch)
-        .sort({ date: -1, createdAt: -1 })
-        .toArray();
-
-      const ws = workbook.addWorksheet("Expenses", { views: [{ state: "frozen", ySplit: 1 }] });
-      ws.columns = [
-        { header: "Date", key: "date", width: 14 },
-        { header: "Type", key: "type", width: 14 },
-        { header: "Name", key: "name", width: 22 },
-        { header: "Amount", key: "amount", width: 14 },
-        { header: "Method", key: "method", width: 10 },
-        { header: "Bank", key: "bank", width: 14 },
-        { header: "Sender", key: "sender", width: 14 },
-        { header: "Note", key: "note", width: 24 },
-      ];
-      styleHeader(ws);
-      for (const e of entries) {
-        ws.addRow({
-          date: exportDate(e.date),
-          type: e.type.replace("_", " "),
-          name: e.name || "",
-          amount: e.amount,
-          method: e.method,
-          bank: e.bankName ?? "",
-          sender: e.sender ?? "",
-          note: e.note ?? "",
-        });
-      }
-      ws.addRow([]);
-      ws.addRow({ date: "Total", name: "", amount: expenseTotal });
-      ws.getRow(ws.rowCount).font = { bold: true };
-    }
-
-    if (features.expenses) {
-      const walletMatch = {
-        ...entryMatch,
-        type: "rotation_cash" as const,
-      };
-      const entries = await db
-        .collection<Entry>("entries")
-        .find(walletMatch)
-        .sort({ date: -1, createdAt: -1 })
-        .toArray();
-
-      const ws = workbook.addWorksheet("Wallet", { views: [{ state: "frozen", ySplit: 1 }] });
-      ws.columns = [
-        { header: "Date", key: "date", width: 14 },
-        { header: "Name", key: "name", width: 22 },
-        { header: "Amount", key: "amount", width: 14 },
-        { header: "Method", key: "method", width: 10 },
-        { header: "Bank", key: "bank", width: 14 },
-        { header: "Sender", key: "sender", width: 14 },
-        { header: "Note", key: "note", width: 24 },
-      ];
-      styleHeader(ws);
-      for (const e of entries) {
-        ws.addRow({
-          date: exportDate(e.date),
-          name: e.name || "",
-          amount: e.amount,
-          method: e.method,
-          bank: e.bankName ?? "",
-          sender: e.sender ?? "",
-          note: e.note ?? "",
-        });
-      }
-      ws.addRow([]);
-      ws.addRow({ date: "Total", name: "", amount: walletTotal });
-      ws.getRow(ws.rowCount).font = { bold: true };
-    }
-
-    if (features.workers) {
-      const workerMatch = {
-        ...entryMatch,
-        type: "worker_payment" as const,
-      };
-      const entries = await db
-        .collection<Entry>("entries")
-        .find(workerMatch)
-        .sort({ date: -1, createdAt: -1 })
-        .toArray();
-
-      const ws = workbook.addWorksheet("Workers", { views: [{ state: "frozen", ySplit: 1 }] });
-      ws.columns = [
-        { header: "Date", key: "date", width: 14 },
-        { header: "Name", key: "name", width: 22 },
-        { header: "Amount", key: "amount", width: 14 },
-        { header: "Method", key: "method", width: 10 },
-        { header: "Bank", key: "bank", width: 14 },
-        { header: "Sender", key: "sender", width: 14 },
-        { header: "Note", key: "note", width: 24 },
-      ];
-      styleHeader(ws);
-      for (const e of entries) {
-        ws.addRow({
-          date: exportDate(e.date),
-          name: e.name || "",
-          amount: e.amount,
-          method: e.method,
-          bank: e.bankName ?? "",
-          sender: e.sender ?? "",
-          note: e.note ?? "",
-        });
-      }
-      ws.addRow([]);
-      ws.addRow({ date: "Total", name: "", amount: workerTotal });
-      ws.getRow(ws.rowCount).font = { bold: true };
-    }
+    // Legacy per-type sheets removed — Ledger sheet matches Google Sheets / entry form.
 
     if (features.stock) {
       const items = await db

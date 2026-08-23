@@ -1,5 +1,5 @@
 // Minimal service worker for PWA installability
-const CACHE = "ledger-v1";
+const CACHE = "site-ledger-v3";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
