@@ -274,9 +274,10 @@ export default function TrackPage() {
         const params = filtersToParams(appliedFilters);
         const res = await apiFetch(`/api/track/summary?${params}`);
         if (!res.ok) throw new Error("Summary failed");
-        stats = await res.json();
+        stats = (await res.json()) as TrackSummaryStats;
         setSummaryStats(stats);
       }
+      if (!stats) return;
       const appName = config?.branding?.appName?.trim() || APP_NAME;
       const text = buildTrackWhatsAppSummary(appName, toSummaryFilters(appliedFilters), stats);
       shareTrackSummaryOnWhatsApp(text);
