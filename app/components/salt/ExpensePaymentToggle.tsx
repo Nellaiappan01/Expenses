@@ -11,11 +11,11 @@ export default function ExpensePaymentToggle({ value, onChange }: Props) {
   const bankSelected = value === "Bank" || value === "GPay";
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-2 max-[360px]:grid-cols-1">
       <button
         type="button"
         onClick={() => onChange("Cash")}
-        className={`flex items-center justify-center gap-2 rounded-xl border-2 px-2 py-3 text-left transition-all ${
+        className={`flex min-h-[48px] items-center justify-center gap-2 rounded-xl border-2 px-2 py-3 text-left transition-all ${
           value === "Cash"
             ? "border-[#0B4A8C] bg-[#EEF5FC]"
             : "border-[#D6E6F5] bg-white hover:border-[#9BBDE0]"
@@ -37,7 +37,7 @@ export default function ExpensePaymentToggle({ value, onChange }: Props) {
       <button
         type="button"
         onClick={() => onChange("Bank")}
-        className={`flex items-center justify-center gap-2 rounded-xl border-2 px-2 py-3 text-left transition-all ${
+        className={`flex min-h-[48px] items-center justify-center gap-2 rounded-xl border-2 px-2 py-3 text-left transition-all ${
           bankSelected
             ? "border-[#0B4A8C] bg-[#EEF5FC]"
             : "border-[#D6E6F5] bg-white hover:border-[#9BBDE0]"

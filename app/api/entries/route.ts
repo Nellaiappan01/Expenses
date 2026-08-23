@@ -12,8 +12,10 @@ import {
   appendEntryToGoogleSheets,
   buildSheetsPayload,
   markEntrySyncStatus,
+  type SheetsWebhookPayload,
 } from "@/lib/googleSheetsSync";
 import { invalidateBalanceCache } from "@/lib/balance";
+import { normalizeStoredAmount } from "@/lib/entryAmount";
 import { getSheetsWebhookUrl } from "@/lib/userSettings";
 import type { Entry, EntryInput } from "@/lib/types";
 
@@ -84,7 +86,7 @@ export async function POST(request: NextRequest) {
       type,
       name: name.trim(),
       nameLower: name.trim().toLowerCase(),
-      amount: Number(amount),
+      amount: normalizeStoredAmount(type, Number(amount)),
       method: method || "Cash",
       date: date || createdAt.toISOString().split("T")[0],
       category: category?.trim() || undefined,
@@ -106,17 +108,21 @@ export async function POST(request: NextRequest) {
     invalidateBalanceCache(userId);
     console.info("[Entries] database save ok:", entryId);
 
-    const payload = buildSheetsPayload({
-      type: entry.type,
-      date: entry.date,
-      name: entry.name,
-      category: entry.category ?? "",
-      amount: entry.amount,
-      method: entry.method,
-      note: entry.note ?? "",
-      bankName: entry.bankName,
-      approvedBy: entry.approvedBy ?? "",
-    });
+    const payload: SheetsWebhookPayload = {
+      action: "append",
+      entryId,
+      ...buildSheetsPayload({
+        type: entry.type,
+        date: entry.date,
+        name: entry.name,
+        category: entry.category ?? "",
+        amount: entry.amount,
+        method: entry.method,
+        note: entry.note ?? "",
+        bankName: entry.bankName,
+        approvedBy: entry.approvedBy ?? "",
+      }),
+    };
 
     const sheetsResult = await appendEntryToGoogleSheets(
       payload,

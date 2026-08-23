@@ -29,21 +29,26 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F8FC] pb-4">
+    <div className="min-h-screen bg-[#F4F8FC] pb-24">
       <SaltWorksHeader />
 
       <StickyOpeningBalance refreshTrigger={refreshTrigger} />
 
-      <div className="mx-auto max-w-md space-y-4 px-4">
+      <div className="mx-auto w-full max-w-md space-y-4 px-3 sm:px-4">
         <SheetsSyncBanner
           refreshTrigger={refreshTrigger}
           onRefresh={() => setRefreshTrigger((n) => n + 1)}
         />
 
-        <ExpenseEntryForm
-          onSuccess={() => setRefreshTrigger((n) => n + 1)}
-          refreshTrigger={refreshTrigger}
-        />
+        <section>
+          <h2 className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-[#5A7FA5]">
+            Today Entry
+          </h2>
+          <ExpenseEntryForm
+            onSuccess={() => setRefreshTrigger((n) => n + 1)}
+            refreshTrigger={refreshTrigger}
+          />
+        </section>
 
         <section>
           <h2 className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-[#5A7FA5]">

@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { ENTRY_TOTALS_GROUP_FIELDS } from "./entryAmount";
 import { buildTotalsBreakdown } from "./totals";
 
 const CACHE_TTL_MS = 15_000;
@@ -30,33 +31,7 @@ export async function computeNetBalance(db: Db, businessId: string): Promise<num
       {
         $group: {
           _id: null,
-          walletIn: {
-            $sum: {
-              $cond: [
-                { $and: [{ $eq: ["$type", "rotation_cash"] }, { $gt: ["$amount", 0] }] },
-                "$amount",
-                0,
-              ],
-            },
-          },
-          walletOut: {
-            $sum: {
-              $cond: [
-                { $and: [{ $eq: ["$type", "rotation_cash"] }, { $lt: ["$amount", 0] }] },
-                { $abs: "$amount" },
-                0,
-              ],
-            },
-          },
-          expense: {
-            $sum: { $cond: [{ $eq: ["$type", "expense"] }, "$amount", 0] },
-          },
-          workerPayment: {
-            $sum: { $cond: [{ $eq: ["$type", "worker_payment"] }, "$amount", 0] },
-          },
-          adjustment: {
-            $sum: { $cond: [{ $eq: ["$type", "adjustment"] }, "$amount", 0] },
-          },
+          ...ENTRY_TOTALS_GROUP_FIELDS,
         },
       },
     ])

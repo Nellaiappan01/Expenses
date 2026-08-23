@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { ENTRY_TOTALS_GROUP_FIELDS } from "@/lib/entryAmount";
 import { buildTotalsBreakdown, EMPTY_TOTALS } from "@/lib/totals";
 
 export async function GET(request: NextRequest) {
@@ -32,39 +33,7 @@ export async function GET(request: NextRequest) {
         {
           $group: {
             _id: null,
-            walletIn: {
-              $sum: {
-                $cond: [
-                  { $and: [{ $eq: ["$type", "rotation_cash"] }, { $gt: ["$amount", 0] }] },
-                  "$amount",
-                  0,
-                ],
-              },
-            },
-            walletOut: {
-              $sum: {
-                $cond: [
-                  { $and: [{ $eq: ["$type", "rotation_cash"] }, { $lt: ["$amount", 0] }] },
-                  { $abs: "$amount" },
-                  0,
-                ],
-              },
-            },
-            expense: {
-              $sum: {
-                $cond: [{ $eq: ["$type", "expense"] }, "$amount", 0],
-              },
-            },
-            workerPayment: {
-              $sum: {
-                $cond: [{ $eq: ["$type", "worker_payment"] }, "$amount", 0],
-              },
-            },
-            adjustment: {
-              $sum: {
-                $cond: [{ $eq: ["$type", "adjustment"] }, "$amount", 0],
-              },
-            },
+            ...ENTRY_TOTALS_GROUP_FIELDS,
           },
         },
       ])

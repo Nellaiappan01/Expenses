@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { invalidateBalanceCache } from "@/lib/balance";
-import { getDb } from "@/lib/mongodb";
-import { getUserId } from "@/lib/user";
+import { normalizeStoredAmount } from "@/lib/entryAmount";
+import { syncEntryAdjustment } from "@/lib/googleSheetsSync";
+import { getDb } from "@/lib/mongodb";import { getUserId } from "@/lib/user";
 import {
   buildUpdateAuditChanges,
   NOT_DELETED_MATCH,
   recordEntryAuditLogs,
 } from "@/lib/entryAudit";
-import type { EntryInput, PaymentMethod } from "@/lib/types";
+import type { EntryInput, EntryType, PaymentMethod } from "@/lib/types";
 
 type AdjustBody = Partial<EntryInput> & {
   reason: string;
@@ -26,7 +27,7 @@ export async function PATCH(
     }
 
     const body: AdjustBody = await request.json();
-    const { reason, editedBy, name, amount, method, date, category, note, bankName } = body;
+    const { reason, editedBy, name, amount, method, date, category, note, bankName, approvedBy } = body;
 
     if (!reason?.trim()) {
       return NextResponse.json({ error: "Reason is required for adjustments" }, { status: 400 });
@@ -66,8 +67,9 @@ export async function PATCH(
       if (Number.isNaN(num) || num === 0) {
         return NextResponse.json({ error: "Enter a valid amount" }, { status: 400 });
       }
-      setUpdate.amount = num;
-      auditInput.amount = num;
+      const entryType = existing.type as EntryType;
+      setUpdate.amount = normalizeStoredAmount(entryType, num);
+      auditInput.amount = setUpdate.amount;
     }
     if (method !== undefined) {
       setUpdate.method = method;
@@ -94,6 +96,17 @@ export async function PATCH(
       if (trimmed) setUpdate.bankName = trimmed;
       else unsetUpdate.bankName = "";
       auditInput.bankName = trimmed || null;
+    }
+    if (approvedBy !== undefined) {
+      const trimmed = approvedBy.trim();
+      if (trimmed) {
+        setUpdate.approvedBy = trimmed;
+        setUpdate.approvedByLower = trimmed.toLowerCase();
+      } else {
+        unsetUpdate.approvedBy = "";
+        unsetUpdate.approvedByLower = "";
+      }
+      auditInput.approvedBy = trimmed || null;
     }
 
     const changes = buildUpdateAuditChanges(existing as Record<string, unknown>, auditInput);
@@ -131,10 +144,22 @@ export async function PATCH(
 
     invalidateBalanceCache(userId);
 
+    const sheetsResult = await syncEntryAdjustment(
+      db,
+      userId,
+      id,
+      "update",
+      result as Record<string, unknown>,
+      existing as Record<string, unknown>,
+      reason.trim()
+    );
+
     return NextResponse.json({
       ...result,
       _id: result._id?.toString(),
       createdAt: result.createdAt?.toISOString?.(),
+      sheetsSyncStatus: sheetsResult.status,
+      sheetsSyncError: sheetsResult.error ?? null,
     });
   } catch (error) {
     console.error("Error adjusting entry:", error);
@@ -223,10 +248,21 @@ export async function DELETE(
 
     invalidateBalanceCache(userId);
 
+    const sheetsResult = await syncEntryAdjustment(
+      db,
+      userId,
+      id,
+      "delete",
+      existing as Record<string, unknown>,
+      existing as Record<string, unknown>
+    );
+
     return NextResponse.json({
       ...result,
       _id: result._id?.toString(),
       createdAt: result.createdAt?.toISOString?.(),
+      sheetsSyncStatus: sheetsResult.status,
+      sheetsSyncError: sheetsResult.error ?? null,
     });
   } catch (error) {
     console.error("Error deleting entry:", error);

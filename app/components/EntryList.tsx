@@ -116,13 +116,15 @@ export default function EntryList({
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/50 py-12 text-center text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-400">
+      <div className="rounded-2xl border border-dashed border-[#B8CDE3] bg-white py-10 text-center text-[#5A7FA5]">
         <p className="text-sm">{todayOnly ? "No entries for today." : "No entries yet."}</p>
-        <p className="mt-1 text-xs">{todayOnly ? "Add an entry above or view all in Track." : "Add your first entry above."}</p>
+        <p className="mt-1 text-xs text-[#9BB5CC]">
+          {todayOnly ? "Add an entry above or view all in Track." : "Add your first entry above."}
+        </p>
         {todayOnly && (
           <Link
             href="/track"
-            className="mt-3 inline-block text-sm font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
+            className="mt-3 inline-block text-sm font-semibold text-[#0B4A8C]"
           >
             View all entries →
           </Link>
@@ -132,11 +134,11 @@ export default function EntryList({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {(hasMore || todayOnly) && (
         <Link
           href="/track"
-          className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white py-2.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+          className="flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-[#D6E6F5] bg-white py-3 text-sm font-semibold text-[#0B4A8C] active:bg-[#F8FBFE]"
         >
           {todayOnly ? "View all entries" : "Track All"}
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -146,7 +148,7 @@ export default function EntryList({
       )}
       {sortedDates.map((dateKey) => (
         <section key={dateKey}>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          <h3 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-wider text-[#7A9BB8]">
             {formatDate(dateKey)}
           </h3>
           <div className="space-y-2">
@@ -155,26 +157,25 @@ export default function EntryList({
               return (
                 <div
                   key={entry._id}
-                  className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+                  className="overflow-hidden rounded-2xl border border-[#D6E6F5] bg-white shadow-sm"
                 >
                   <button
                     type="button"
                     onClick={() =>
                       setExpandedId(isExpanded ? null : entry._id ?? null)
                     }
-                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                    className="flex w-full min-h-[52px] items-center justify-between gap-3 px-4 py-3 text-left"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-zinc-900 dark:text-zinc-100">
-                        {entry.name}
-                      </p>
-                      <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      <p className="truncate font-semibold text-[#0B4A8C]">{entry.name}</p>
+                      <p className="mt-0.5 truncate text-xs text-[#5A7FA5]">
+                        {entry.category ? `${entry.category} · ` : ""}
                         {entry.method}
                       </p>
                     </div>
-                    <div className="ml-3 flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                       <p
-                        className={`font-semibold tabular-nums ${entryAmountColorClass(entry)}`}
+                        className={`font-bold tabular-nums ${entryAmountColorClass(entry)}`}
                       >
                         {formatEntryAmount(entry.amount, entry.type)}
                       </p>

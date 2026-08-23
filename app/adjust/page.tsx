@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
+import { normalizeStoredAmount } from "@/lib/entryAmount";
+import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
 import type { Entry, PaymentMethod } from "@/lib/types";
 import {
   amountInputClass,
@@ -18,21 +20,27 @@ import SearchableDropdown from "../components/ui/SearchableDropdown";
 import { useConfig } from "../context/ConfigContext";
 import { useUser } from "../context/UserContext";
 
-function formatAmount(amount: number) {
-  const sign = amount >= 0 ? "" : "-";
-  return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
-}
-
 function entrySummary(entry: Entry) {
   const parts = [formatDateDDMMYYYY(entry.date), entry.method];
   if (entry.category) parts.push(entry.category);
   return parts.join(" · ");
 }
 
+function sheetsSyncMessage(status?: string, error?: string | null) {
+  if (status === "synced") return "Google Sheet updated.";
+  if (status === "failed") {
+    return error
+      ? `Saved in app. Sheet sync failed: ${error}`
+      : "Saved in app. Google Sheet sync failed — redeploy Apps Script from Settings.";
+  }
+  return "Saved in app.";
+}
+
 export default function AdjustPage() {
   const router = useRouter();
   const { config } = useConfig() ?? {};
   const { userName } = useUser();
+  const feedbackRef = useRef<HTMLDivElement>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Entry[]>([]);
@@ -41,12 +49,16 @@ export default function AdjustPage() {
 
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
+  const [approvedBy, setApprovedBy] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("Cash");
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  const [expenseCategoryOptions, setExpenseCategoryOptions] = useState<string[]>([]);
+  const [workerCategoryOptions, setWorkerCategoryOptions] = useState<string[]>([]);
+  const [requestedByOptions, setRequestedByOptions] = useState<string[]>([]);
   const [workerOptions, setWorkerOptions] = useState<string[]>([]);
+  const [approvedByOptions, setApprovedByOptions] = useState<string[]>([]);
   const [bankOptions, setBankOptions] = useState<string[]>([]);
   const [bankName, setBankName] = useState("");
 
@@ -70,7 +82,10 @@ export default function AdjustPage() {
     ]);
     if (defaultsRes.ok) {
       const data = await defaultsRes.json();
-      setCategoryOptions(data.workerCategories ?? []);
+      setExpenseCategoryOptions(data.expenseCategories ?? []);
+      setWorkerCategoryOptions(data.workerCategories ?? []);
+      setRequestedByOptions(data.expenseNames ?? []);
+      setApprovedByOptions(data.approverNames ?? []);
       setBankOptions(data.banks ?? []);
     }
     if (namesRes.ok) {
@@ -84,15 +99,25 @@ export default function AdjustPage() {
   }, [loadDefaults]);
 
   useEffect(() => {
-    if (!success) return;
-    const timer = setTimeout(() => setSuccess(""), 2500);
-    return () => clearTimeout(timer);
-  }, [success]);
+    if (!error && !success) return;
+    feedbackRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [error, success]);
+
+  function showFeedback(message: string, isError = false) {
+    if (isError) {
+      setSuccess("");
+      setError(message);
+    } else {
+      setError("");
+      setSuccess(message);
+    }
+  }
 
   function populateForm(entry: Entry) {
     setSelected(entry);
     setName(entry.name);
     setCategory(entry.category ?? "");
+    setApprovedBy(entry.approvedBy ?? "");
     setAmount(String(Math.abs(entry.amount)));
     setMethod(entry.method);
     setNote(entry.note ?? "");
@@ -116,10 +141,10 @@ export default function AdjustPage() {
       const data = await res.json();
       setSearchResults(data.entries ?? []);
       if ((data.entries ?? []).length === 0) {
-        setError("No entries found. Try a different search.");
+        showFeedback("No entries found. Try a different search.", true);
       }
     } catch {
-      setError("Could not search entries");
+      showFeedback("Could not search entries", true);
     } finally {
       setSearching(false);
     }
@@ -134,22 +159,23 @@ export default function AdjustPage() {
     };
 
     const numAmount = Number(amount);
-    const signedAmount =
-      selected.type === "worker_payment" || selected.type === "expense"
-        ? -Math.abs(numAmount)
-        : selected.amount >= 0
-          ? Math.abs(numAmount)
-          : -Math.abs(numAmount);
+    const normalizedAmount = normalizeStoredAmount(selected.type, numAmount);
 
     if (name.trim() !== selected.name) payload.name = name.trim();
     if ((category.trim() || "") !== (selected.category ?? "")) {
       payload.category = category.trim();
     }
-    if (signedAmount !== selected.amount) payload.amount = signedAmount;
+    if (normalizedAmount !== selected.amount) payload.amount = normalizedAmount;
     if (method !== selected.method) payload.method = method;
     if ((note.trim() || "") !== (selected.note ?? "")) payload.note = note.trim();
     if (method === "Bank" && bankName.trim() !== (selected.bankName ?? "")) {
       payload.bankName = bankName.trim();
+    }
+    if (
+      selected.type === "expense" &&
+      (approvedBy.trim() || "") !== (selected.approvedBy ?? "")
+    ) {
+      payload.approvedBy = approvedBy.trim();
     }
 
     return payload;
@@ -160,21 +186,36 @@ export default function AdjustPage() {
     if (!selected || saving) return;
 
     if (!reason.trim()) {
-      setError("Reason is required for every adjustment");
+      showFeedback("Please fill in Reason — it is required for every adjustment.", true);
       return;
     }
 
     const numAmount = Number(amount);
     if (!amount || Number.isNaN(numAmount) || numAmount <= 0) {
-      setError("Enter a valid amount");
+      showFeedback("Enter a valid amount", true);
       return;
     }
     if (selected.type === "worker_payment" && !name.trim()) {
-      setError("Worker name is required");
+      showFeedback("Worker name is required", true);
+      return;
+    }
+    if (selected.type === "expense" && !name.trim()) {
+      showFeedback("Requested by is required", true);
+      return;
+    }
+    if (
+      (selected.type === "expense" || selected.type === "worker_payment") &&
+      !category.trim()
+    ) {
+      showFeedback("Category is required", true);
+      return;
+    }
+    if (selected.type === "expense" && !approvedBy.trim()) {
+      showFeedback("Approved by is required", true);
       return;
     }
     if (method === "Bank" && !bankName.trim()) {
-      setError("Select a bank");
+      showFeedback("Select a bank", true);
       return;
     }
 
@@ -183,11 +224,12 @@ export default function AdjustPage() {
 
     const { reason: _r, editedBy: _e, ...changes } = payload;
     if (Object.keys(changes).length === 0) {
-      setError("No changes to save");
+      showFeedback("No changes to save — edit a field first.", true);
       return;
     }
 
     setError("");
+    setSuccess("");
     setSaving(true);
 
     try {
@@ -196,18 +238,18 @@ export default function AdjustPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Failed to save adjustment");
       }
-      const updated = await res.json();
-      setSuccess("Entry updated — audit log recorded");
-      populateForm(updated);
-      setSearchResults((prev) =>
-        prev.map((e) => (e._id === updated._id ? updated : e))
-      );
+
+      const sheetNote = sheetsSyncMessage(data.sheetsSyncStatus, data.sheetsSyncError);
+      showFeedback(`Saved! ${sheetNote} Returning to home…`);
+      setSearchResults((prev) => prev.map((e) => (e._id === data._id ? data : e)));
+
+      setTimeout(() => router.push("/"), 1800);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      showFeedback(err instanceof Error ? err.message : "Something went wrong", true);
     } finally {
       setSaving(false);
     }
@@ -216,12 +258,15 @@ export default function AdjustPage() {
   async function handleDelete() {
     if (!selected || deleting) return;
     if (!reason.trim()) {
-      setError("Reason is required before deleting");
+      showFeedback("Please fill in Reason before deleting.", true);
       return;
     }
-    if (!confirm(`Delete "${selected.name}" (${formatAmount(selected.amount)})?`)) return;
+    if (!confirm(`Delete "${selected.name}" (${formatEntryAmount(selected.amount, selected.type)})?`)) {
+      return;
+    }
 
     setError("");
+    setSuccess("");
     setDeleting(true);
 
     try {
@@ -233,20 +278,19 @@ export default function AdjustPage() {
           editedBy: userName || "User",
         }),
       });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Failed to delete");
       }
-      setSuccess("Entry deleted — audit log recorded");
-      setSelected(null);
+
+      const sheetNote = sheetsSyncMessage(data.sheetsSyncStatus, data.sheetsSyncError);
+      showFeedback(`Deleted. ${sheetNote} Returning to home…`);
       setSearchResults((prev) => prev.filter((e) => e._id !== selected._id));
-      setName("");
-      setCategory("");
-      setAmount("");
-      setNote("");
-      setReason("");
+      setSelected(null);
+
+      setTimeout(() => router.push("/"), 1800);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      showFeedback(err instanceof Error ? err.message : "Something went wrong", true);
     } finally {
       setDeleting(false);
     }
@@ -255,16 +299,20 @@ export default function AdjustPage() {
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   if (config && !features.expenses && !features.workers) return null;
 
-  const showWorker = selected?.type === "worker_payment" || selected?.type === "expense";
-  const showCategory = selected?.type === "worker_payment";
+  const isExpense = selected?.type === "expense";
+  const isWorker = selected?.type === "worker_payment";
+  const showName = isExpense || isWorker;
+  const showCategory = isExpense || isWorker;
+  const categoryOptions = isExpense ? expenseCategoryOptions : workerCategoryOptions;
+  const nameOptions = isExpense ? requestedByOptions : workerOptions;
 
   return (
-    <div className="min-h-screen bg-zinc-100">
+    <div className="min-h-screen bg-[#F4F8FC]">
       <div className="mx-auto max-w-md px-3 py-4 pb-12 sm:px-4">
         <header className="mb-4 flex items-center gap-3">
           <Link
             href="/"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#D6E4F0] bg-white text-[#5A6B7D] hover:bg-[#F8FBFF]"
             aria-label="Back to home"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -272,15 +320,14 @@ export default function AdjustPage() {
             </svg>
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-zinc-900">Adjust Entry</h1>
-            <p className="text-sm text-zinc-500">Search, edit, or delete with audit trail</p>
+            <h1 className="text-xl font-bold text-[#1A2B3C]">Adjust Entry</h1>
+            <p className="text-sm text-[#5A6B7D]">Search, edit, or delete with audit trail</p>
           </div>
         </header>
 
-        {/* Search */}
         <form
           onSubmit={handleSearch}
-          className="mb-4 space-y-2 rounded-2xl bg-white p-4 shadow-sm"
+          className="mb-4 space-y-2 rounded-2xl border border-[#D6E4F0] bg-white p-4 shadow-sm"
         >
           <label htmlFor="adjust-search" className={labelClass}>
             Search entry
@@ -291,23 +338,22 @@ export default function AdjustPage() {
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Worker name, note, or keyword…"
+              placeholder="Name, note, or keyword…"
               className={inputClassSm}
             />
             <button
               type="submit"
               disabled={searching || !searchQuery.trim()}
-              className="shrink-0 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
+              className="shrink-0 rounded-xl bg-[#2563EB] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-60"
             >
               {searching ? "…" : "Go"}
             </button>
           </div>
         </form>
 
-        {/* Results */}
         {searchResults.length > 0 && !selected && (
           <div className="mb-4 space-y-2">
-            <p className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <p className="px-1 text-xs font-semibold uppercase tracking-wide text-[#5A6B7D]">
               {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}
             </p>
             {searchResults.map((entry) => (
@@ -315,53 +361,76 @@ export default function AdjustPage() {
                 key={entry._id}
                 type="button"
                 onClick={() => populateForm(entry)}
-                className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-white px-4 py-3 text-left shadow-sm transition-colors hover:border-amber-300 hover:bg-amber-50/50 active:scale-[0.99]"
+                className="flex w-full items-center justify-between rounded-xl border border-[#D6E4F0] bg-white px-4 py-3 text-left shadow-sm transition-colors hover:border-[#93C5FD] hover:bg-[#EFF6FF] active:scale-[0.99]"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-zinc-900">{entry.name}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500">{entrySummary(entry)}</p>
+                  <p className="truncate font-medium text-[#1A2B3C]">{entry.name}</p>
+                  <p className="mt-0.5 text-xs text-[#5A6B7D]">{entrySummary(entry)}</p>
                 </div>
                 <p
-                  className={`ml-3 shrink-0 font-semibold tabular-nums ${
-                    entry.amount >= 0 ? "text-emerald-600" : "text-red-600"
-                  }`}
+                  className={`ml-3 shrink-0 font-semibold tabular-nums ${entryAmountColorClass(entry)}`}
                 >
-                  {formatAmount(entry.amount)}
+                  {formatEntryAmount(entry.amount, entry.type)}
                 </p>
               </button>
             ))}
           </div>
         )}
 
-        {/* Edit form */}
         {selected && (
-          <form onSubmit={handleSave} className="form-enter space-y-4 rounded-2xl bg-white p-4 shadow-sm">
+          <form onSubmit={handleSave} className="form-enter space-y-4 rounded-2xl border border-[#D6E4F0] bg-white p-4 shadow-sm">
+            <div ref={feedbackRef} className="space-y-2">
+              {error && (
+                <div
+                  className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                  role="alert"
+                >
+                  <svg className="mt-0.5 h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>{error}</span>
+                </div>
+              )}
+              {success && (
+                <div
+                  className="success-enter flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
+                  role="status"
+                >
+                  <svg className="mt-0.5 h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>{success}</span>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#2563EB]">
                   Editing
                 </p>
-                <p className="truncate font-medium text-zinc-900">{selected.name}</p>
+                <p className="truncate font-medium text-[#1A2B3C]">{selected.name}</p>
               </div>
               <button
                 type="button"
                 onClick={() => {
                   setSelected(null);
                   setError("");
+                  setSuccess("");
                 }}
-                className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100"
+                className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-[#5A6B7D] hover:bg-[#F4F8FC]"
               >
                 Change
               </button>
             </div>
 
-            {showWorker && (
+            {showName && (
               <SearchableDropdown
-                label="Worker"
+                label={isExpense ? "Requested by" : "Worker"}
                 value={name}
                 onChange={setName}
-                options={workerOptions}
-                placeholder="Worker name…"
+                options={nameOptions}
+                placeholder={isExpense ? "Who requested…" : "Worker name…"}
                 addNewLabel="Use this name"
                 required
               />
@@ -375,6 +444,18 @@ export default function AdjustPage() {
                 options={categoryOptions}
                 placeholder="Category…"
                 addNewLabel="Use this category"
+                required
+              />
+            )}
+
+            {isExpense && (
+              <SearchableDropdown
+                label="Approved by"
+                value={approvedBy}
+                onChange={setApprovedBy}
+                options={approvedByOptions}
+                placeholder="Approver…"
+                addNewLabel="Use this name"
                 required
               />
             )}
@@ -432,7 +513,7 @@ export default function AdjustPage() {
               />
             </div>
 
-            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
               <label htmlFor="adjust-reason" className={labelClass}>
                 Reason <span className="text-red-500">*</span>
               </label>
@@ -445,37 +526,19 @@ export default function AdjustPage() {
                 required
                 className={inputClassSm}
               />
-              <p className="mt-1.5 text-xs text-amber-700">
-                Required for audit log — records original value, new value, editor, and time.
+              <p className="mt-1.5 text-xs text-amber-800">
+                Required — without this, Save will not work.
               </p>
             </div>
 
-            {error && (
-              <p className="text-sm text-red-600" role="alert">
-                {error}
-              </p>
-            )}
-
-            {success && (
-              <div
-                className="success-enter flex items-center gap-2 rounded-xl bg-green-50 px-4 py-2.5 text-sm font-medium text-green-700"
-                role="status"
-              >
-                <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                {success}
-              </div>
-            )}
-
-            <button type="submit" disabled={saving} className={btnSaveClass}>
+            <button type="submit" disabled={saving || deleting} className={btnSaveClass}>
               {saving ? "Saving…" : "Save Changes"}
             </button>
 
             <button
               type="button"
               onClick={handleDelete}
-              disabled={deleting}
+              disabled={deleting || saving}
               className={btnDeleteClass}
             >
               {deleting ? "Deleting…" : "Delete Entry"}
@@ -484,7 +547,7 @@ export default function AdjustPage() {
         )}
 
         {!selected && searchResults.length === 0 && !error && (
-          <p className="px-1 text-center text-sm text-zinc-500">
+          <p className="px-1 text-center text-sm text-[#5A6B7D]">
             Search for an entry above to edit or delete it.
           </p>
         )}

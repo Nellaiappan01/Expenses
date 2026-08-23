@@ -42,6 +42,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   themeColor: "#0B4A8C",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -50,10 +51,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <head />
+    <html lang="en" className="light" suppressHydrationWarning>
+      <head>
+        <meta name="color-scheme" content="light only" />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased pb-20`}
+        className={`${geistSans.variable} ${geistMono.variable} bg-[#F4F8FC] text-[#171717] antialiased pb-20`}
       >
         <UserProvider>
           <ConfigProvider>

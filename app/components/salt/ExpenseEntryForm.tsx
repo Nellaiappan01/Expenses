@@ -13,7 +13,7 @@ function todayISO() {
 }
 
 function fieldClass() {
-  return "w-full rounded-xl border border-[#D6E6F5] bg-[#F8FBFE] px-3 py-2.5 text-sm text-[#0B4A8C] outline-none transition-colors placeholder:text-[#9BB5CC] focus:border-[#0B4A8C] focus:bg-white [font-size:16px]";
+  return "w-full min-h-[48px] rounded-xl border border-[#D6E6F5] bg-[#F8FBFE] px-3 py-3 text-base text-[#0B4A8C] outline-none transition-colors placeholder:text-[#9BB5CC] focus:border-[#0B4A8C] focus:bg-white [font-size:16px]";
 }
 
 export default function ExpenseEntryForm({
@@ -183,10 +183,13 @@ export default function ExpenseEntryForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="form-enter rounded-2xl border border-[#D6E6F5] bg-white p-3 shadow-sm sm:p-4"
+      className="form-enter rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm"
     >
-      <div className="space-y-2.5">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="space-y-3">
+        <div className="min-w-0">
+          <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]">
+            Date
+          </label>
           <div className="relative">
             <input
               type="date"
@@ -202,18 +205,21 @@ export default function ExpenseEntryForm({
               </svg>
             </div>
           </div>
+        </div>
+
+        <div className="min-w-0">
           <SearchableDropdown
-            hideLabel
             label="Category"
             value={category}
             onChange={setCategory}
             options={categoryOptions}
-            placeholder="Category *"
+            placeholder="Select category"
             addNewLabel="Add category"
             required
             inputRef={categoryRef}
             onEnter={() => amountRef.current?.focus()}
             inputClassName={fieldClass()}
+            labelClassName="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]"
           />
         </div>
 
@@ -257,56 +263,60 @@ export default function ExpenseEntryForm({
           className={`${fieldClass()} resize-none`}
         />
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="min-w-0 space-y-3">
           <SearchableDropdown
-            hideLabel
             label="Requested by"
             value={requestedBy}
             onChange={setRequestedBy}
             options={requestedByOptions}
-            placeholder="Requested by *"
+            placeholder="Select name"
             addNewLabel="Add name"
             required
             inputRef={requestedRef}
             inputClassName={fieldClass()}
+            labelClassName="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]"
           />
           <SearchableDropdown
-            hideLabel
             label="Approved by"
             value={approvedBy}
             onChange={setApprovedBy}
             options={approvedByOptions}
-            placeholder="Approved by *"
+            placeholder="Select approver"
             addNewLabel="Add approver"
             required
             inputRef={approvedRef}
             inputClassName={fieldClass()}
+            labelClassName="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#5A7FA5]"
           />
         </div>
 
         <ExpensePaymentToggle value={method} onChange={setMethod} />
 
-        <AttachmentUploader
-          attachmentUrl={attachmentUrl}
-          attachmentPublicId={attachmentPublicId}
-          onChange={(url, publicId) => {
-            setAttachmentUrl(url);
-            setAttachmentPublicId(publicId);
-          }}
-          onError={setError}
-          compact
-        />
+        <div className="min-w-0">
+          <AttachmentUploader
+            attachmentUrl={attachmentUrl}
+            attachmentPublicId={attachmentPublicId}
+            onChange={(url, publicId) => {
+              setAttachmentUrl(url);
+              setAttachmentPublicId(publicId);
+            }}
+            onError={setError}
+            compact
+          />
+        </div>
 
-        <SearchableDropdown
-          hideLabel
-          label="Tags"
-          value={tags}
-          onChange={setTags}
-          options={tagOptions}
-          placeholder="Tags (optional)"
-          addNewLabel="Add tag"
-          inputClassName={fieldClass()}
-        />
+        <div className="min-w-0">
+          <SearchableDropdown
+            hideLabel
+            label="Tags"
+            value={tags}
+            onChange={setTags}
+            options={tagOptions}
+            placeholder="Tags (optional)"
+            addNewLabel="Add tag"
+            inputClassName={fieldClass()}
+          />
+        </div>
 
         {error && (
           <p className="text-sm text-red-600" role="alert">

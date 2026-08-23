@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
+import { normalizeStoredAmount } from "@/lib/entryAmount";
 import type { Entry, PaymentMethod } from "@/lib/types";
 import { useUser } from "../context/UserContext";
 
@@ -66,19 +67,14 @@ export default function EditEntrySheet({
     setSaving(true);
     try {
       const numAmount = Number(amount);
-      const signedAmount =
-        entry.type === "worker_payment" || entry.type === "expense"
-          ? -Math.abs(numAmount)
-          : entry.amount >= 0
-            ? Math.abs(numAmount)
-            : -Math.abs(numAmount);
+      const normalizedAmount = normalizeStoredAmount(entry.type, numAmount);
 
       const payload: Record<string, unknown> = {
         reason: reason.trim(),
         editedBy: userName || "User",
       };
       if (name.trim() !== entry.name) payload.name = name.trim();
-      if (signedAmount !== entry.amount) payload.amount = signedAmount;
+      if (normalizedAmount !== entry.amount) payload.amount = normalizedAmount;
       if (method !== entry.method) payload.method = method;
       if (date !== entry.date) payload.date = date;
       if ((category.trim() || "") !== (entry.category ?? "")) payload.category = category.trim();
