@@ -57,13 +57,16 @@ export function invalidateClientCache(prefix?: string) {
 /** GET JSON with in-memory TTL cache. Returns stale data immediately when revalidating. */
 export async function cachedApiJson<T>(
   url: string,
-  ttlMs = 45_000
+  ttlMs = 45_000,
+  options?: { skipCache?: boolean }
 ): Promise<{ data: T | null; fromCache: boolean }> {
   const key = cacheKey(url);
-  const cached = readClientCache<T>(key);
-  if (cached !== null) {
-    void revalidateJson<T>(url, key, ttlMs);
-    return { data: cached, fromCache: true };
+  if (!options?.skipCache) {
+    const cached = readClientCache<T>(key);
+    if (cached !== null) {
+      void revalidateJson<T>(url, key, ttlMs);
+      return { data: cached, fromCache: true };
+    }
   }
 
   const fresh = await revalidateJson<T>(url, key, ttlMs);

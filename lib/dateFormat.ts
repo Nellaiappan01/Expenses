@@ -112,6 +112,24 @@ export function formatDayMonthYear(date: Date | string): string {
   return formatDateDisplay(date, { weekday: false });
 }
 
+/** Inclusive calendar days between two YYYY-MM-DD values. */
+export function inclusiveDayCount(from: string, to: string): number {
+  const start = parseLocalDate(from);
+  const end = parseLocalDate(to);
+  if (!start || !end) return 0;
+  const diff = Math.round((end.getTime() - start.getTime()) / 86_400_000);
+  return Math.max(1, diff + 1);
+}
+
+/** Compact range for chips and headers: 3 Aug 2026 – 5 Aug 2026 */
+export function formatDateRangeLabel(from?: string, to?: string): string {
+  if (!from && !to) return "All dates";
+  if (from && to && from !== to) {
+    return `${formatDateDisplay(from, { weekday: false })} – ${formatDateDisplay(to, { weekday: false })}`;
+  }
+  return formatDateDisplay(from || to || "");
+}
+
 /** Local time HH:MM for a transaction row */
 export function formatTimeHHMM(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;

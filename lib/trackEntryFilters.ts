@@ -1,4 +1,5 @@
 import { SHEETS_SYNC_DEFERRED_NOR } from "./googleSheetsSync";
+import { AWAITING_APPROVER_MATCH, AWAITING_PAYMENT_MATCH } from "./paymentWorkflow";
 
 export type TrackFilterParams = {
   from?: string | null;
@@ -47,6 +48,21 @@ function buildSearchOr(search: string): Record<string, unknown>[] {
   }
 
   return or;
+}
+
+function andWorkflowMatch(match: Record<string, unknown>, extra: Record<string, unknown>) {
+  const extraOr = extra.$or as Record<string, unknown>[] | undefined;
+  const rest = { ...extra };
+  delete rest.$or;
+  Object.assign(match, rest);
+  if (!extraOr) return;
+  if (match.$or) {
+    const existingAnd = Array.isArray(match.$and) ? match.$and : [];
+    match.$and = [...existingAnd, { $or: match.$or }, { $or: extraOr }];
+    delete match.$or;
+  } else {
+    match.$or = extraOr;
+  }
 }
 
 /** MongoDB match for Track page list + WhatsApp summary (same filters). */
@@ -106,12 +122,9 @@ export function buildTrackEntryMatch(
 
   const workflowStatus = filters.workflowStatus?.trim();
   if (workflowStatus === "approval_pending") {
-    match.type = "expense";
-    match.approvalStatus = "pending";
+    andWorkflowMatch(match, AWAITING_APPROVER_MATCH);
   } else if (workflowStatus === "payment_pending") {
-    match.type = "expense";
-    match.approvalStatus = "approved";
-    match.paymentStatus = "pending";
+    andWorkflowMatch(match, AWAITING_PAYMENT_MATCH);
   } else if (workflowStatus === "paid") {
     const paidOr = [
       { type: { $ne: "expense" } },

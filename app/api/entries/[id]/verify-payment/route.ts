@@ -4,15 +4,8 @@ import { requireAdmin } from "@/lib/adminAuth";
 import { invalidateBalanceCache } from "@/lib/balance";
 import { NOT_DELETED_MATCH, recordEntryAuditLogs } from "@/lib/entryAudit";
 import { serializeEntry } from "@/lib/entrySerialize";
-import {
-  appendEntryToGoogleSheets,
-  buildSheetsPayload,
-  markEntrySyncStatus,
-  syncEntryAdjustment,
-  type SheetsWebhookPayload,
-} from "@/lib/googleSheetsSync";
+import { upsertEntryToSheets } from "@/lib/googleSheetsSync";
 import { getDb } from "@/lib/mongodb";
-import { getSheetsWebhookUrl } from "@/lib/userSettings";
 import { validatePaymentReference } from "@/lib/paymentReference";
 import type { PaymentVerifiedMethod } from "@/lib/types";
 
@@ -146,58 +139,19 @@ export async function POST(
 
     invalidateBalanceCache(businessId);
 
-    const hadSheetSync = existing.sheetsSyncStatus === "synced";
-    let sheetsSyncStatus = existing.sheetsSyncStatus as string | undefined;
-    let sheetsSyncError: string | null = null;
-
-    if (hadSheetSync) {
-      const sheetsResult = await syncEntryAdjustment(
-        db,
-        businessId,
-        id,
-        "update",
-        result as Record<string, unknown>,
-        existing as Record<string, unknown>,
-        `Paid via ${paymentVerifiedMethod}${paymentReference ? ` — ${paymentReference}` : ""}`
-      );
-      sheetsSyncStatus = sheetsResult.status;
-      sheetsSyncError = sheetsResult.error ?? null;
-    } else {
-      const entryId = id;
-      const payload: SheetsWebhookPayload = {
-        action: "append",
-        entryId,
-        ...buildSheetsPayload({
-          type: "expense",
-          date: result.date as string,
-          name: result.name as string,
-          category: (result.category as string) ?? "",
-          amount: result.amount as number,
-          method: (result.method as string) ?? "Cash",
-          note: (result.note as string) ?? "",
-          bankName: result.bankName as string | undefined,
-          approvedBy: (result.approvedBy as string) ?? "",
-          approvalStatus: "approved",
-          paymentStatus: "paid",
-        }),
-        adjustReason: `Paid ${paymentDate} — ${paymentVerifiedMethod}`,
-      };
-      const webhook = (await getSheetsWebhookUrl(db, businessId)) ?? "";
-      const sheetsResult = await appendEntryToGoogleSheets(payload, webhook);
-      if (sheetsResult.ok) {
-        await markEntrySyncStatus(db, entryId, businessId, "synced");
-        sheetsSyncStatus = "synced";
-      } else {
-        await markEntrySyncStatus(db, entryId, businessId, "failed", sheetsResult.error);
-        sheetsSyncStatus = "failed";
-        sheetsSyncError = sheetsResult.error ?? null;
-      }
-    }
+    const sheetsResult = await upsertEntryToSheets(
+      db,
+      businessId,
+      id,
+      result as Record<string, unknown>,
+      existing as Record<string, unknown>,
+      `Paid via ${paymentVerifiedMethod}${paymentReference ? ` — ${paymentReference}` : ""}`
+    );
 
     return NextResponse.json({
       ...serializeEntry(result),
-      sheetsSyncStatus,
-      sheetsSyncError,
+      sheetsSyncStatus: sheetsResult.status,
+      sheetsSyncError: sheetsResult.error ?? null,
     });
   } catch (error) {
     console.error("Verify payment error:", error);

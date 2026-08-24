@@ -31,11 +31,57 @@ export function paymentStatusEmoji(status?: PaymentStatus): string {
   return "✓";
 }
 
-/** Badge colors + labels for each workflow stage (expenses only). */
+export function hasApproverName(entry: { approvedBy?: string }): boolean {
+  return Boolean(entry.approvedBy?.trim());
+}
+
+/** Waiting for Approved by — no approver name yet. */
+export function isAwaitingApprover(entry: {
+  type?: string;
+  approvalStatus?: ApprovalStatus;
+  paymentStatus?: PaymentStatus;
+  approvedBy?: string;
+}): boolean {
+  if (entry.type !== "expense") return false;
+  if (isLegacyWorkflowEntry(entry)) return false;
+  if (entry.paymentStatus === "paid") return false;
+  if (entry.approvalStatus === "rejected") return false;
+  if (hasApproverName(entry) || entry.approvalStatus === "approved") return false;
+  return !entry.approvalStatus || entry.approvalStatus === "pending";
+}
+
+/** Approved (or approver name filled) and not paid yet — matches sheet "Payment Pending". */
+export function isAwaitingPayment(entry: {
+  type?: string;
+  approvalStatus?: ApprovalStatus;
+  paymentStatus?: PaymentStatus;
+  approvedBy?: string;
+}): boolean {
+  if (entry.type !== "expense") return false;
+  if (isLegacyWorkflowEntry(entry)) return false;
+  if (entry.paymentStatus === "paid") return false;
+  if (entry.approvalStatus === "rejected") return false;
+  return entry.approvalStatus === "approved" || hasApproverName(entry);
+}
+
+export const AWAITING_APPROVER_MATCH: Record<string, unknown> = {
+  type: "expense",
+  approvalStatus: "pending",
+  paymentStatus: { $ne: "paid" },
+  $or: [{ approvedBy: { $exists: false } }, { approvedBy: null }, { approvedBy: "" }],
+};
+
+export const AWAITING_PAYMENT_MATCH: Record<string, unknown> = {
+  type: "expense",
+  paymentStatus: { $ne: "paid" },
+  approvalStatus: { $ne: "rejected" },
+  $or: [{ approvalStatus: "approved" }, { approvedBy: { $gt: "" } }],
+};
 export function workflowBadgeMeta(entry: {
   type?: string;
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
+  approvedBy?: string;
 }): {
   label: string;
   className: string;
@@ -44,13 +90,6 @@ export function workflowBadgeMeta(entry: {
   if (entry.type !== "expense") return null;
   if (!entry.approvalStatus && !entry.paymentStatus) return null;
 
-  if (entry.approvalStatus === "pending") {
-    return {
-      label: "Pending Approval",
-      className: "bg-slate-100 text-slate-700 ring-1 ring-slate-200/80",
-      icon: "pending_approval",
-    };
-  }
   if (entry.approvalStatus === "rejected") {
     return {
       label: "Rejected",
@@ -63,6 +102,13 @@ export function workflowBadgeMeta(entry: {
       label: "Paid",
       className: "bg-[#0B4A8C]/10 text-[#0B4A8C] ring-1 ring-[#0B4A8C]/15",
       icon: "paid",
+    };
+  }
+  if (isAwaitingApprover(entry)) {
+    return {
+      label: "Pending Approval",
+      className: "bg-slate-100 text-slate-700 ring-1 ring-slate-200/80",
+      icon: "pending_approval",
     };
   }
   return {
@@ -88,12 +134,13 @@ export function formatSheetPaymentStatus(entry: {
   type?: string;
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
+  approvedBy?: string;
 }): string {
   if (entry.type !== "expense") return "";
   if (isLegacyWorkflowEntry(entry)) return "Paid / Verified";
-  if (entry.approvalStatus === "pending") return "Pending Approval";
   if (entry.approvalStatus === "rejected") return "Rejected";
   if (entry.paymentStatus === "paid") return "Paid / Verified";
+  if (entry.approvalStatus === "pending" && !entry.approvedBy?.trim()) return "Pending Approval";
   return "Payment Pending";
 }
 
@@ -102,9 +149,12 @@ export function canUserModifyEntry(entry: {
   type?: string;
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
+  approvedBy?: string;
 }): boolean {
   if (entry.type !== "expense") return true;
   if (isLegacyWorkflowEntry(entry)) return true;
+  if (entry.paymentStatus === "paid") return false;
+  if (hasApproverName(entry) || entry.approvalStatus === "approved") return false;
   return entry.approvalStatus === "pending";
 }
 
@@ -112,6 +162,7 @@ export function entryModifyLockReason(entry: {
   type?: string;
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
+  approvedBy?: string;
 }): string | null {
   if (canUserModifyEntry(entry)) return null;
   if (entry.approvalStatus === "rejected") {
@@ -120,7 +171,7 @@ export function entryModifyLockReason(entry: {
   if (entry.paymentStatus === "paid") {
     return "Admin marked this as paid / verified. Date, amount, and other fields cannot be changed.";
   }
-  if (entry.approvalStatus === "approved") {
+  if (entry.approvalStatus === "approved" || hasApproverName(entry)) {
     return "Approved on site — waiting for admin payment. Date and amount cannot be changed until then.";
   }
   return "This entry cannot be changed.";
@@ -131,11 +182,12 @@ export function entryLockShortLabel(entry: {
   type?: string;
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
+  approvedBy?: string;
 }): string | null {
   if (canUserModifyEntry(entry)) return null;
   if (entry.paymentStatus === "paid") return "Paid / verified — cannot edit";
   if (entry.approvalStatus === "rejected") return "Rejected — cannot edit";
-  if (entry.approvalStatus === "approved") return "Waiting payment — cannot edit";
+  if (entry.approvalStatus === "approved" || hasApproverName(entry)) return "Waiting payment — cannot edit";
   return "Cannot edit";
 }
 

@@ -3,6 +3,8 @@ import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import { getSheetsSyncCounts, retryAllSheetsSyncs } from "@/lib/googleSheetsSync";
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const userId = await getUserId(request);

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, readApiJson } from "@/lib/api";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
+import { notifyLedgerDataChanged } from "@/lib/clientDataCache";
 import {
   buildUpiPayUrl,
   formatBankDetailsText,
@@ -18,6 +19,18 @@ type PaymentEntry = Entry & { businessName?: string; payee?: ExpensePerson };
 
 const PAYMENT_METHODS: PaymentVerifiedMethod[] = ["Cash", "GPay / UPI", "Bank Transfer"];
 const DEFAULT_GPAY_NOTE = "Paid GPay";
+const BULK_SAVE_CHUNK = 6;
+
+type BulkProgress = {
+  phase: "saving" | "sheet";
+  done: number;
+  total: number;
+  failed: number;
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export default function PaymentManagement({ dashboard = false }: { dashboard?: boolean }) {
   const [filter, setFilter] = useState<PaymentFilter>("payment_pending");
@@ -52,12 +65,16 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
   const [requestedByNames, setRequestedByNames] = useState<string[]>([]);
   const [pendingTotal, setPendingTotal] = useState({ count: 0, amount: 0 });
   const [paidTotal, setPaidTotal] = useState({ count: 0, amount: 0 });
+  const [approvalTotal, setApprovalTotal] = useState({ count: 0, amount: 0 });
+  const [filteredTotal, setFilteredTotal] = useState({ count: 0, amount: 0 });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showBulk, setShowBulk] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
+  const [saveElapsed, setSaveElapsed] = useState(0);
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,11 +93,20 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
       setUsers(data.users ?? []);
       setRequestedByNames(data.requestedByNames ?? []);
       if (data.pendingTotal) setPendingTotal(data.pendingTotal);
+      else setPendingTotal({ count: 0, amount: 0 });
       if (data.paidTotal) setPaidTotal(data.paidTotal);
       else setPaidTotal({ count: 0, amount: 0 });
+      if (data.approvalTotal) setApprovalTotal(data.approvalTotal);
+      else setApprovalTotal({ count: 0, amount: 0 });
+      if (data.filteredTotal) setFilteredTotal(data.filteredTotal);
+      else setFilteredTotal({ count: 0, amount: 0 });
       if (data.counts) setCounts(data.counts);
       const pendingIds = nextEntries
-        .filter((entry) => entry.approvalStatus !== "pending" && entry.paymentStatus !== "paid")
+        .filter(
+          (entry) =>
+            entry.paymentStatus !== "paid" &&
+            (entry.approvalStatus === "approved" || Boolean(entry.approvedBy?.trim()))
+        )
         .map((entry) => entry._id)
         .filter((id): id is string => Boolean(id));
       setSelectedIds(requestedBy ? pendingIds : []);
@@ -97,7 +123,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
   useEffect(() => {
     if (!success) return;
-    const t = setTimeout(() => setSuccess(""), 3000);
+    const t = setTimeout(() => setSuccess(""), 8000);
     return () => clearTimeout(t);
   }, [success]);
 
@@ -106,6 +132,15 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     const t = setTimeout(() => setCopyMsg(""), 2000);
     return () => clearTimeout(t);
   }, [copyMsg]);
+
+  useEffect(() => {
+    if (!saving) {
+      setSaveElapsed(0);
+      return;
+    }
+    const t = setInterval(() => setSaveElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [saving]);
 
   function choosePaymentMethod(method: PaymentVerifiedMethod) {
     setPaymentMethod(method);
@@ -243,8 +278,9 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           paymentNote: paymentNote || undefined,
         }),
       });
-      const data = await res.json();
+      const data = await readApiJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error || "Verification failed");
+      notifyLedgerDataChanged();
       setSuccess("Payment marked as paid & verified");
       setVerifyEntry(null);
       load();
@@ -282,39 +318,95 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     }
     setSaving(true);
     setError("");
+    const ids = [...selectedIds];
+    const total = ids.length;
+    setBulkProgress({ phase: "saving", done: 0, total, failed: 0 });
     try {
-      const res = await apiFetch("/api/admin/payments/bulk-pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requestedBy: requestedBy || undefined,
-          from: fromDate || undefined,
-          to: toDate || undefined,
-          businessId: businessId || undefined,
-          ids: selectedIds,
-          paymentMethod,
-          paymentDate,
-          paymentReference:
-            paymentMethod === "Bank Transfer" || paymentMethod === "GPay / UPI"
-              ? referenceCheck.value
-              : undefined,
-          paymentPaidTo:
-            paymentMethod === "Cash" ? paymentPaidTo.trim() || requestedBy : undefined,
-          paymentNote: paymentNote || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Bulk pay failed");
+      let paidCount = 0;
+      let paidAmount = 0;
+      const paidIds: string[] = [];
+
+      for (let i = 0; i < ids.length; i += BULK_SAVE_CHUNK) {
+        const chunk = ids.slice(i, i + BULK_SAVE_CHUNK);
+        const res = await apiFetch("/api/admin/payments/bulk-pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestedBy: requestedBy || undefined,
+            from: fromDate || undefined,
+            to: toDate || undefined,
+            businessId: businessId || undefined,
+            ids: chunk,
+            skipSheets: true,
+            paymentMethod,
+            paymentDate,
+            paymentReference:
+              paymentMethod === "Bank Transfer" || paymentMethod === "GPay / UPI"
+                ? referenceCheck.value
+                : undefined,
+            paymentPaidTo:
+              paymentMethod === "Cash" ? paymentPaidTo.trim() || requestedBy : undefined,
+            paymentNote: paymentNote || undefined,
+          }),
+        });
+        const data = await readApiJson<{
+          paidCount?: number;
+          paidAmount?: number;
+          error?: string;
+        }>(res);
+        if (!res.ok) throw new Error(data.error || "Bulk pay failed");
+        paidCount += data.paidCount ?? 0;
+        paidAmount += Number(data.paidAmount || 0);
+        paidIds.push(...chunk);
+        setBulkProgress({
+          phase: "saving",
+          done: Math.min(paidIds.length, total),
+          total,
+          failed: 0,
+        });
+      }
+
+      setBulkProgress({ phase: "sheet", done: 0, total: paidIds.length, failed: 0 });
+      if (paidIds.length > 0) {
+        await apiFetch("/api/admin/payments/sync-sheets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: paidIds }),
+        });
+
+        const deadline = Date.now() + 90_000;
+        while (Date.now() < deadline) {
+          const progressRes = await apiFetch(
+            `/api/admin/payments/sync-progress?ids=${paidIds.join(",")}`
+          );
+          const progress = await readApiJson<{
+            total?: number;
+            synced?: number;
+            failed?: number;
+            done?: number;
+          }>(progressRes);
+          const synced = progress.synced ?? progress.done ?? 0;
+          const failed = progress.failed ?? 0;
+          const sheetTotal = progress.total || paidIds.length;
+          setBulkProgress({ phase: "sheet", done: synced, total: sheetTotal, failed });
+          if (synced + failed >= sheetTotal) break;
+          await sleep(1500);
+        }
+      }
+
+      notifyLedgerDataChanged();
       setSuccess(
-        `Marked ${data.paidCount} payment${data.paidCount === 1 ? "" : "s"} as paid — ₹${Number(data.paidAmount || 0).toLocaleString("en-IN")}`
+        `Saved ${paidCount} of ${total} in app — ₹${paidAmount.toLocaleString("en-IN")}. Sheet is updating.`
       );
       setShowBulk(false);
       setPaymentReference("");
+      setBulkProgress(null);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk pay failed");
     } finally {
       setSaving(false);
+      setBulkProgress(null);
     }
   }
 
@@ -348,6 +440,24 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
       ? validatePaymentReference(paymentMethod, paymentReference)
       : { ok: true as const, value: "" };
   const bankDetails = payee ? formatBankDetailsText(payee) : "";
+  const filterLabel =
+    filter === "approval_pending"
+      ? "Pending approval"
+      : filter === "payment_pending"
+        ? "To pay"
+        : filter === "paid"
+          ? "Paid"
+          : "All statuses";
+  const rangeLabel =
+    fromDate && toDate
+      ? `${formatDateDDMMYYYY(fromDate)} to ${formatDateDDMMYYYY(toDate)}`
+      : fromDate
+        ? `From ${formatDateDDMMYYYY(fromDate)}`
+        : toDate
+          ? `Until ${formatDateDDMMYYYY(toDate)}`
+          : "All dates";
+  const peopleLabel = requestedBy || "All people";
+  const accountLabel = users.find((u) => u.userId === businessId)?.name || "All accounts";
 
   return (
     <div className={shellClass}>
@@ -371,7 +481,10 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
             className="min-h-[4.5rem] rounded-2xl border border-amber-200 bg-amber-50 px-2 py-2.5 text-left active:scale-[0.99]"
           >
             <p className="text-[10px] font-semibold uppercase leading-tight text-amber-800">Need approver</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">{counts.approvalPending}</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">{approvalTotal.count}</p>
+            <p className="mt-0.5 text-[11px] font-bold tabular-nums text-amber-800">
+              ₹{Math.round(approvalTotal.amount).toLocaleString("en-IN")}
+            </p>
           </button>
           <button
             type="button"
@@ -379,7 +492,10 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
             className="min-h-[4.5rem] rounded-2xl border border-yellow-200 bg-yellow-50 px-2 py-2.5 text-left active:scale-[0.99]"
           >
             <p className="text-[10px] font-semibold uppercase leading-tight text-yellow-800">To pay</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-yellow-900">{counts.paymentPending}</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-yellow-900">{pendingTotal.count}</p>
+            <p className="mt-0.5 text-[11px] font-bold tabular-nums text-yellow-800">
+              ₹{Math.round(pendingTotal.amount).toLocaleString("en-IN")}
+            </p>
           </button>
           <button
             type="button"
@@ -387,7 +503,10 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
             className="min-h-[4.5rem] rounded-2xl border border-green-200 bg-green-50 px-2 py-2.5 text-left active:scale-[0.99]"
           >
             <p className="text-[10px] font-semibold uppercase leading-tight text-green-800">Paid</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-green-900">{counts.paid}</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-green-900">{paidTotal.count}</p>
+            <p className="mt-0.5 text-[11px] font-bold tabular-nums text-green-800">
+              ₹{Math.round(paidTotal.amount).toLocaleString("en-IN")}
+            </p>
           </button>
         </div>
       )}
@@ -465,6 +584,21 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
               className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm"
             />
           </div>
+        </div>
+
+        <div className="mb-3 rounded-2xl bg-[#0B4A8C] px-4 py-3 text-white shadow-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-100">
+            {filterLabel} total
+          </p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums">
+            ₹{Math.round(filteredTotal.amount).toLocaleString("en-IN")}
+          </p>
+          <p className="mt-1 text-[11px] leading-snug text-sky-100">
+            {filteredTotal.count} {filteredTotal.count === 1 ? "entry" : "entries"} · {rangeLabel}
+            {" · "}
+            {peopleLabel}
+            {businessId ? ` · ${accountLabel}` : ""}
+          </p>
         </div>
 
         {requestedBy && pendingTotal.count > 0 && filter !== "paid" ? (
@@ -565,7 +699,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                 }}
               >
                 <span className="flex min-w-0 items-start gap-2">
-                  {requestedBy && e.approvalStatus !== "pending" && e.paymentStatus !== "paid" ? (
+                  {requestedBy && e.paymentStatus !== "paid" && (e.approvalStatus === "approved" || Boolean(e.approvedBy?.trim())) ? (
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4 accent-[#0B4A8C]"
@@ -1009,7 +1143,9 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           <button
             type="button"
             className="fixed inset-0 z-[70] bg-black/50"
-            onClick={() => setShowBulk(false)}
+            onClick={() => {
+              if (!saving) setShowBulk(false);
+            }}
             aria-label="Close"
           />
           <div className="fixed inset-x-0 bottom-0 z-[71] max-h-[88dvh] overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:inset-x-4 sm:bottom-auto sm:top-8 sm:mx-auto sm:max-h-[85vh] sm:max-w-md sm:rounded-2xl">
@@ -1106,6 +1242,40 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
             </div>
 
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+            {saving && bulkProgress && (
+              <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                <p className="font-semibold">
+                  {bulkProgress.phase === "saving"
+                    ? `Saving in app: ${bulkProgress.done} / ${bulkProgress.total}`
+                    : `Updating Google Sheet: ${bulkProgress.done} / ${bulkProgress.total}`}
+                </p>
+                <p className="mt-0.5 text-xs">
+                  {bulkProgress.phase === "saving"
+                    ? "Do not tap again. Payments are being marked paid one batch at a time."
+                    : bulkProgress.failed > 0
+                      ? `${bulkProgress.failed} sheet row${bulkProgress.failed === 1 ? "" : "s"} still need retry — do not tap Sync All yet.`
+                      : "Sheet rows update one by one. Please wait."}
+                </p>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-amber-200">
+                  <div
+                    className="h-full rounded-full bg-green-600 transition-all duration-300"
+                    style={{
+                      width: `${
+                        bulkProgress.total > 0
+                          ? Math.min(
+                              100,
+                              bulkProgress.phase === "saving"
+                                ? (bulkProgress.done / bulkProgress.total) * 50
+                                : 50 + (bulkProgress.done / bulkProgress.total) * 50
+                            )
+                          : 8
+                      }%`,
+                    }}
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-amber-800">{saveElapsed}s elapsed</p>
+              </div>
+            )}
 
             <button
               type="button"
@@ -1118,8 +1288,10 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
               onClick={handleBulkPay}
               className="mt-4 w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white disabled:opacity-60"
             >
-              {saving
-                ? "Saving…"
+              {saving && bulkProgress
+                ? bulkProgress.phase === "saving"
+                  ? `Saving ${bulkProgress.done} / ${bulkProgress.total}…`
+                  : `Sheet ${bulkProgress.done} / ${bulkProgress.total}…`
                 : `Mark ${selectedIds.length} as paid · ₹${selectedPendingAmount.toLocaleString("en-IN")}`}
             </button>
           </div>

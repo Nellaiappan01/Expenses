@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { syncEverything } from "@/lib/clientSync";
+import { LEDGER_DATA_CHANGED } from "@/lib/clientDataCache";
 import { getOfflineQueueCount } from "@/lib/offlineEntryQueue";
 
 export default function SheetsSyncBanner({
@@ -65,6 +66,14 @@ export default function SheetsSyncBanner({
   }, [refreshCounts, refreshTrigger]);
 
   useEffect(() => {
+    if (counts.total === 0 && !syncing) return;
+    const timer = window.setInterval(() => {
+      void refreshCounts();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [counts.total, syncing, refreshCounts]);
+
+  useEffect(() => {
     const onQueue = () => setOfflineCount(getOfflineQueueCount());
     const onSync = () => {
       void refreshCounts();
@@ -72,9 +81,11 @@ export default function SheetsSyncBanner({
     };
     window.addEventListener("offline-queue-updated", onQueue);
     window.addEventListener("sync-all-complete", onSync);
+    window.addEventListener(LEDGER_DATA_CHANGED, onSync);
     return () => {
       window.removeEventListener("offline-queue-updated", onQueue);
       window.removeEventListener("sync-all-complete", onSync);
+      window.removeEventListener(LEDGER_DATA_CHANGED, onSync);
     };
   }, [refreshCounts, onRefresh]);
 
@@ -117,6 +128,16 @@ export default function SheetsSyncBanner({
           )}
           {grandTotal > 0 && (
             <p className={!isOnline ? "mt-0.5 text-xs text-slate-600" : "text-amber-900"}>
+              {syncing && (
+                <span className="mr-1 font-semibold">
+                  Syncing… {Math.max(0, counts.total)} left
+                </span>
+              )}
+              {!syncing && counts.total > 0 && (
+                <span className="mr-1 font-semibold">
+                  Sheet progress: {counts.pending + counts.failed} left
+                </span>
+              )}
               {offlineCount > 0 && (
                 <span>
                   <strong>{offlineCount}</strong> saved offline
@@ -150,7 +171,7 @@ export default function SheetsSyncBanner({
           disabled={syncing || !isOnline}
           className="shrink-0 rounded-lg bg-[#0B4A8C] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#083A6E] disabled:opacity-50"
         >
-          {syncing ? "Syncing…" : "Sync All"}
+          {syncing ? `Syncing… ${counts.total} left` : "Sync All"}
         </button>
       </div>
     </div>

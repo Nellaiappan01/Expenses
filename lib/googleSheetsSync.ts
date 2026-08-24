@@ -39,10 +39,66 @@ export type SheetsSyncResult = {
   error?: string;
   responseStatus?: number;
   responseBody?: string;
+  timedOut?: boolean;
 };
 
 /** Max wait for Apps Script webhook — avoids hanging requests indefinitely. */
-const SHEETS_FETCH_TIMEOUT_MS = 12_000;
+const SHEETS_FETCH_TIMEOUT_MS = 20_000;
+
+export function sheetRowMayExist(entry: Record<string, unknown> | null | undefined): boolean {
+  if (!entry) return false;
+  if (entry.sheetsSyncedAt) return true;
+  const status = entry.sheetsSyncStatus;
+  if (status === "synced" || status === "failed") return true;
+  if (status === "pending" && entry.sheetsSyncError) return true;
+  return false;
+}
+
+function isSheetsTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "TimeoutError" ||
+    error.name === "AbortError" ||
+    /timeout|timed out|aborted/i.test(error.message)
+  );
+}
+
+function isSheetRowNotFound(error?: string): boolean {
+  return Boolean(error && /row not found/i.test(error));
+}
+
+function interpretSheetsResponse(res: Response, responseBody: string): SheetsSyncResult {
+  let parsed: { ok?: boolean; error?: string } | null = null;
+  if (responseBody.trim()) {
+    try {
+      parsed = JSON.parse(responseBody) as { ok?: boolean; error?: string };
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (parsed && parsed.ok === false) {
+    return {
+      ok: false,
+      status: "failed",
+      error: parsed.error || "Google Sheets returned an error",
+      responseStatus: res.status,
+      responseBody,
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: "failed",
+      error: responseBody || `HTTP ${res.status}`,
+      responseStatus: res.status,
+      responseBody,
+    };
+  }
+
+  return { ok: true, status: "synced", responseStatus: res.status, responseBody };
+}
 
 export function buildSheetsPayload(row: {
   type: EntryType;
@@ -174,25 +230,44 @@ export async function appendEntryToGoogleSheets(
     console.info("[Google Sheets] response status:", res.status);
     console.info("[Google Sheets] response body:", responseBody || "(empty)");
 
-    if (!res.ok) {
-      const error = responseBody || `HTTP ${res.status}`;
-      console.error("[Google Sheets] sync failed:", error);
-      return {
-        ok: false,
-        status: "failed",
-        error,
-        responseStatus: res.status,
-        responseBody,
-      };
+    const interpreted = interpretSheetsResponse(res, responseBody);
+    if (interpreted.ok) {
+      console.info("[Google Sheets] sync succeeded");
+    } else {
+      console.error("[Google Sheets] sync failed:", interpreted.error);
     }
-
-    console.info("[Google Sheets] sync succeeded");
-    return { ok: true, status: "synced", responseStatus: res.status, responseBody };
+    return interpreted;
   } catch (error) {
     const message = error instanceof Error ? error.message : "sync_failed";
     console.error("[Google Sheets] request error:", message);
+    if (isSheetsTimeout(error)) {
+      return {
+        ok: false,
+        status: "pending",
+        timedOut: true,
+        error:
+          "Google Sheet is still writing. Do not tap Sync again yet — retry will update the same row, not add a duplicate.",
+      };
+    }
     return { ok: false, status: "failed", error: message };
   }
+}
+
+async function persistSyncResult(
+  db: Db,
+  entryId: string,
+  businessId: string,
+  result: SheetsSyncResult
+) {
+  if (result.ok) {
+    await markEntrySyncStatus(db, entryId, businessId, "synced");
+    return;
+  }
+  if (result.timedOut || result.status === "pending") {
+    await markEntrySyncStatus(db, entryId, businessId, "pending", result.error);
+    return;
+  }
+  await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
 }
 
 export async function markEntrySyncStatus(
@@ -229,24 +304,61 @@ export async function syncEntryById(
     return { ok: false, status: "failed", error: "Entry not found", entryId };
   }
 
+  const result = await upsertEntryToSheets(
+    db,
+    businessId,
+    entryId,
+    entry as Record<string, unknown>,
+    entry as Record<string, unknown>
+  );
+
+  return { ...result, entryId };
+}
+
+/** Update the existing sheet row when it may already exist; otherwise append. Never double-append on retry. */
+export async function upsertEntryToSheets(
+  db: Db,
+  businessId: string,
+  entryId: string,
+  entryDoc: Record<string, unknown>,
+  originalEntry?: Record<string, unknown>,
+  adjustReason?: string
+): Promise<SheetsSyncResult> {
+  const webhookUrl = (await getSheetsWebhookUrl(db, businessId)) ?? "";
+  if (!webhookUrl.trim()) {
+    const error = "Apps Script webhook URL is not configured for this account";
+    await markEntrySyncStatus(db, entryId, businessId, "failed", error);
+    return { ok: false, status: "failed", error };
+  }
+
   await markEntrySyncStatus(db, entryId, businessId, "pending");
+
+  const source = originalEntry ?? entryDoc;
+  if (sheetRowMayExist(source) || sheetRowMayExist(entryDoc)) {
+    const updated = await postSheetsAdjustment(
+      webhookUrl,
+      entryId,
+      "update",
+      entryDoc,
+      originalEntry,
+      adjustReason
+    );
+    if (updated.ok || updated.timedOut || !isSheetRowNotFound(updated.error)) {
+      await persistSyncResult(db, entryId, businessId, updated);
+      return updated;
+    }
+  }
 
   const payload: SheetsWebhookPayload = {
     action: "append",
     entryId,
-    ...buildSheetsPayload(entryDocToSheetsRow(entry)),
+    match: originalEntry ? buildSheetsMatch(entryDocToSheetsRow(originalEntry)) : undefined,
+    ...buildSheetsPayload(entryDocToSheetsRow(entryDoc)),
+    adjustReason: adjustReason?.trim() || "",
   };
-
-  const webhookUrl = (await getSheetsWebhookUrl(db, businessId)) ?? "";
-  const result = await appendEntryToGoogleSheets(payload, webhookUrl);
-
-  if (result.ok) {
-    await markEntrySyncStatus(db, entryId, businessId, "synced");
-  } else {
-    await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
-  }
-
-  return { ...result, entryId };
+  const appended = await appendEntryToGoogleSheets(payload, webhookUrl);
+  await persistSyncResult(db, entryId, businessId, appended);
+  return appended;
 }
 
 /** Sync an edited or deleted entry to Google Sheets (update/delete row + recalc balances). */
@@ -268,6 +380,29 @@ export async function syncEntryAdjustment(
     };
   }
 
+  if (action === "update") {
+    return upsertEntryToSheets(db, businessId, entryId, entryDoc, originalEntry, adjustReason);
+  }
+
+  const result = await postSheetsAdjustment(
+    webhookUrl,
+    entryId,
+    action,
+    entryDoc,
+    originalEntry,
+    adjustReason
+  );
+  return result;
+}
+
+async function postSheetsAdjustment(
+  webhookUrl: string,
+  entryId: string,
+  action: "update" | "delete",
+  entryDoc: Record<string, unknown>,
+  originalEntry?: Record<string, unknown>,
+  adjustReason?: string
+): Promise<SheetsSyncResult> {
   const payload: SheetsWebhookPayload = {
     action,
     entryId,
@@ -275,22 +410,7 @@ export async function syncEntryAdjustment(
     ...buildSheetsPayload(entryDocToSheetsRow(entryDoc)),
     adjustReason: adjustReason?.trim() || "",
   };
-
-  if (action === "update") {
-    await markEntrySyncStatus(db, entryId, businessId, "pending");
-  }
-
-  const result = await appendEntryToGoogleSheets(payload, webhookUrl);
-
-  if (action === "update") {
-    if (result.ok) {
-      await markEntrySyncStatus(db, entryId, businessId, "synced");
-    } else {
-      await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
-    }
-  }
-
-  return result;
+  return appendEntryToGoogleSheets(payload, webhookUrl);
 }
 
 async function runSheetsAppend(
@@ -302,17 +422,16 @@ async function runSheetsAppend(
   try {
     const webhookUrl = (await getSheetsWebhookUrl(db, businessId)) ?? "";
     const result = await appendEntryToGoogleSheets(payload, webhookUrl);
+    await persistSyncResult(db, entryId, businessId, result);
     if (result.ok) {
-      await markEntrySyncStatus(db, entryId, businessId, "synced");
       console.info(`[Google Sheets] background append ok: ${entryId}`);
     } else {
-      await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
       console.error(`[Google Sheets] background append failed: ${entryId}`, result.error);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "sync_failed";
     console.error(`[Google Sheets] background append error: ${entryId}`, message);
-    await markEntrySyncStatus(db, entryId, businessId, "failed", message).catch(() => {});
+    await markEntrySyncStatus(db, entryId, businessId, "pending", message).catch(() => {});
   }
 }
 
@@ -337,19 +456,45 @@ export function scheduleSheetsAdjustment(
   adjustReason?: string
 ) {
   after(() =>
-    syncEntryAdjustment(
-      db,
-      businessId,
-      entryId,
-      action,
-      entryDoc,
-      originalEntry,
-      adjustReason
+    (action === "delete"
+      ? syncEntryAdjustment(db, businessId, entryId, action, entryDoc, originalEntry, adjustReason)
+      : upsertEntryToSheets(db, businessId, entryId, entryDoc, originalEntry, adjustReason)
     ).catch((error) => {
       const message = error instanceof Error ? error.message : "sync_failed";
       console.error(`[Google Sheets] background ${action} error: ${entryId}`, message);
     })
   );
+}
+
+export function scheduleSheetsUpserts(
+  db: Db,
+  businessId: string,
+  jobs: Array<{
+    entryId: string;
+    entryDoc: Record<string, unknown>;
+    originalEntry?: Record<string, unknown>;
+    adjustReason?: string;
+  }>
+) {
+  after(() => {
+    void (async () => {
+      for (const job of jobs) {
+        try {
+          await upsertEntryToSheets(
+            db,
+            businessId,
+            job.entryId,
+            job.entryDoc,
+            job.originalEntry,
+            job.adjustReason
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "sync_failed";
+          console.error(`[Google Sheets] background upsert error: ${job.entryId}`, message);
+        }
+      }
+    })();
+  });
 }
 
 export async function retryAllFailedSyncs(db: Db, businessId: string) {

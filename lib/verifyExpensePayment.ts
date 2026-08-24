@@ -1,14 +1,7 @@
 import { ObjectId, type Db } from "mongodb";
 import { invalidateBalanceCache } from "@/lib/balance";
 import { NOT_DELETED_MATCH, recordEntryAuditLogs } from "@/lib/entryAudit";
-import {
-  appendEntryToGoogleSheets,
-  buildSheetsPayload,
-  markEntrySyncStatus,
-  syncEntryAdjustment,
-  type SheetsWebhookPayload,
-} from "@/lib/googleSheetsSync";
-import { getSheetsWebhookUrl } from "@/lib/userSettings";
+import { markEntrySyncStatus, upsertEntryToSheets } from "@/lib/googleSheetsSync";
 import type { PaymentVerifiedMethod } from "@/lib/types";
 
 export async function markExpensePaymentPaid(
@@ -21,8 +14,11 @@ export async function markExpensePaymentPaid(
     paymentReference: string;
     paymentPaidTo: string;
     paymentNote: string;
-  }
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  },
+  options?: { deferSheets?: boolean }
+): Promise<
+  { ok: true; entry: Record<string, unknown> } | { ok: false; error: string }
+> {
   const id = String(existing._id);
   const businessId = existing.businessId as string;
   const approvalStatus = existing.approvalStatus as string | undefined;
@@ -98,44 +94,14 @@ export async function markExpensePaymentPaid(
 
   invalidateBalanceCache(businessId);
 
-  const hadSheetSync = existing.sheetsSyncStatus === "synced";
-  if (hadSheetSync) {
-    await syncEntryAdjustment(
-      db,
-      businessId,
-      id,
-      "update",
-      result as Record<string, unknown>,
-      existing,
-      `Paid via ${paymentMethod}${paymentReference ? ` — ${paymentReference}` : ""}`
-    );
-  } else {
-    const payload: SheetsWebhookPayload = {
-      action: "append",
-      entryId: id,
-      ...buildSheetsPayload({
-        type: "expense",
-        date: result.date as string,
-        name: result.name as string,
-        category: (result.category as string) ?? "",
-        amount: result.amount as number,
-        method: (result.method as string) ?? "Cash",
-        note: (result.note as string) ?? "",
-        bankName: result.bankName as string | undefined,
-        approvedBy: (result.approvedBy as string) ?? "",
-        approvalStatus: "approved",
-        paymentStatus: "paid",
-      }),
-      adjustReason: `Paid ${paymentDate} — ${paymentMethod}`,
-    };
-    const webhook = (await getSheetsWebhookUrl(db, businessId)) ?? "";
-    const sheetsResult = await appendEntryToGoogleSheets(payload, webhook);
-    if (sheetsResult.ok) {
-      await markEntrySyncStatus(db, id, businessId, "synced");
-    } else {
-      await markEntrySyncStatus(db, id, businessId, "failed", sheetsResult.error);
-    }
+  const paidDoc = result as Record<string, unknown>;
+  const adjustReason = `Paid via ${paymentMethod}${paymentReference ? ` — ${paymentReference}` : ""}`;
+
+  if (options?.deferSheets) {
+    await markEntrySyncStatus(db, id, businessId, "pending");
+    return { ok: true, entry: paidDoc };
   }
 
-  return { ok: true };
+  await upsertEntryToSheets(db, businessId, id, paidDoc, existing, adjustReason);
+  return { ok: true, entry: paidDoc };
 }

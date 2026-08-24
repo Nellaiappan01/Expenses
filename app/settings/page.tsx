@@ -45,7 +45,7 @@ function CopyButton({
 
 const SETUP_STEPS = [
   "Create a Google Sheet — row 1 must use the column headers below.",
-  "Tap Copy script → Extensions → Apps Script → paste → Save.",
+  "Tap Copy script → Extensions → Apps Script → paste → Save → Deploy (new version if you already deployed).",
   "Deploy → New deployment → Web app (Execute as: Me, Access: Anyone).",
   "Copy the Web App URL and paste it below, then Save settings.",
 ];

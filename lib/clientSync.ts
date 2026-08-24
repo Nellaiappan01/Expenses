@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, readApiJson } from "./api";
 import { flushOfflineQueue } from "./offlineEntryQueue";
 
 export type SyncAllResult = {
@@ -21,7 +21,11 @@ export async function syncEverything(): Promise<SyncAllResult> {
 
   try {
     const res = await apiFetch("/api/sheets/sync-all", { method: "POST" });
-    const data = await res.json();
+    const data = await readApiJson<{
+      succeeded?: number;
+      failed?: number;
+      counts?: { pending: number; failed: number; total: number };
+    }>(res);
     if (res.ok) {
       sheetsSucceeded = data.succeeded ?? 0;
       sheetsFailed = data.failed ?? 0;

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
+import { healNamedApprovals } from "@/lib/healNamedApprovals";
 import { buildTrackEntryMatch, trackFiltersFromSearchParams } from "@/lib/trackEntryFilters";
-import { buildTrackSummaryStats } from "@/lib/trackWhatsAppSummary";
+import { buildTrackSummaryStats, buildWorkflowTotals } from "@/lib/trackWhatsAppSummary";
 import type { Entry } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
@@ -10,15 +11,38 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const userId = await getUserId(request);
     const db = await getDb();
-    const match = buildTrackEntryMatch(userId, trackFiltersFromSearchParams(searchParams));
+    await healNamedApprovals(db, userId);
+    const filters = trackFiltersFromSearchParams(searchParams);
+    const listMatch = buildTrackEntryMatch(userId, filters);
+    const overviewMatch = buildTrackEntryMatch(userId, {
+      ...filters,
+      workflowStatus: null,
+      sheetsSync: null,
+    });
 
-    const entries = await db
-      .collection<Entry>("entries")
-      .find(match)
-      .sort({ date: -1, createdAt: -1 })
-      .toArray();
+    const [entries, overviewEntries] = await Promise.all([
+      db
+        .collection<Entry>("entries")
+        .find(listMatch)
+        .sort({ date: -1, createdAt: -1 })
+        .toArray(),
+      db
+        .collection<Entry>("entries")
+        .find(overviewMatch)
+        .project({
+          type: 1,
+          amount: 1,
+          approvalStatus: 1,
+          paymentStatus: 1,
+          approvedBy: 1,
+        })
+        .toArray(),
+    ]);
 
-    return NextResponse.json(buildTrackSummaryStats(entries));
+    const stats = buildTrackSummaryStats(entries);
+    stats.workflowTotals = buildWorkflowTotals(overviewEntries as Entry[]);
+
+    return NextResponse.json(stats);
   } catch (error) {
     console.error("Error fetching track summary:", error);
     return NextResponse.json(

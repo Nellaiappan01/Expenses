@@ -1,5 +1,5 @@
 import type { Entry } from "./types";
-import { isLegacyWorkflowEntry } from "./paymentWorkflow";
+import { isAwaitingApprover, isAwaitingPayment, isLegacyWorkflowEntry } from "./paymentWorkflow";
 
 export type TrackSummaryFilters = {
   from: string;
@@ -170,13 +170,13 @@ function expenseWorkflowBucket(entry: Entry): WorkflowBucket | null {
   if (entry.type !== "expense") return null;
   if (entry.approvalStatus === "rejected") return null;
   if (isLegacyWorkflowEntry(entry)) return "paid";
-  if (entry.approvalStatus === "pending") return "pending_approval";
   if (entry.paymentStatus === "paid") return "paid";
-  if (entry.approvalStatus === "approved") return "payment_pending";
+  if (isAwaitingApprover(entry)) return "pending_approval";
+  if (isAwaitingPayment(entry)) return "payment_pending";
   return "paid";
 }
 
-function buildWorkflowTotals(entries: Entry[]): WorkflowTotals {
+export function buildWorkflowTotals(entries: Entry[]): WorkflowTotals {
   const totals: WorkflowTotals = {
     pendingApproval: { amount: 0, count: 0 },
     paymentPending: { amount: 0, count: 0 },

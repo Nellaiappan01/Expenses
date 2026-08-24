@@ -28,3 +28,20 @@ export function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   }
   return fetch(url, { ...init, headers });
 }
+
+/** Parse JSON from an API response. HTML/timeout pages become a clear error instead of a JSON parse crash. */
+export async function readApiJson<T = Record<string, unknown>>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const compact = text.replace(/\s+/g, " ").trim().slice(0, 120);
+    if (/an error occurred/i.test(text) || compact.startsWith("<")) {
+      throw new Error(
+        "Server timed out. Refresh the list before tapping again — the data may already be saved."
+      );
+    }
+    throw new Error(`Unexpected response: ${compact}`);
+  }
+}

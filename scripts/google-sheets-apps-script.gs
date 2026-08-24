@@ -14,7 +14,7 @@
  * Column L: Adjust Reason — filled when an entry is edited in the app
  * Column M: Entry ID — stored automatically for update/delete sync
  *
- * Version: 2026-08-24 (Payment workflow + admin edit/delete sync)
+ * Version: 2026-08-24b (Idempotent upsert — retry never duplicates rows)
  */
 
 const COL = {
@@ -43,13 +43,13 @@ function doPost(e) {
     const action = (data.action || "append").toLowerCase();
 
     if (action === "update") {
-      return doUpdate_(sheet, data);
+      return doUpsert_(sheet, data);
     }
     if (action === "delete") {
       return doDelete_(sheet, data);
     }
 
-    return doAppend_(sheet, data);
+    return doUpsert_(sheet, data);
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
   }
@@ -58,6 +58,15 @@ function doPost(e) {
 /** For browser test — optional */
 function doGet() {
   return jsonResponse_({ ok: true, message: "Site Ledger webhook is running" });
+}
+
+/** Append a new row, or update if this Entry ID already exists (prevents double entries on retry). */
+function doUpsert_(sheet, data) {
+  const existing = findEntryRow_(sheet, data);
+  if (existing) {
+    return doUpdateAtRow_(sheet, data, existing);
+  }
+  return doAppend_(sheet, data);
 }
 
 function doAppend_(sheet, data) {
@@ -100,12 +109,12 @@ function doAppend_(sheet, data) {
 function doUpdate_(sheet, data) {
   const row = findEntryRow_(sheet, data);
   if (!row) {
-    return jsonResponse_({
-      ok: false,
-      error: "Sheet row not found for this entry. Redeploy this script if you recently updated it.",
-    });
+    return doAppend_(sheet, data);
   }
+  return doUpdateAtRow_(sheet, data, row);
+}
 
+function doUpdateAtRow_(sheet, data, row) {
   sheet.getRange(row, COL.DATE).setValue(formatDate_(data.date));
   sheet.getRange(row, COL.CATEGORY).setValue(data.category || "");
   sheet.getRange(row, COL.EXPENSE).setValue(data.expenseAmount || "");
@@ -161,14 +170,15 @@ function findRowByEntryId_(sheet, entryId) {
   const id = String(entryId).trim();
   if (!id || lastRow < 2) return 0;
 
-  for (let r = 2; r <= lastRow; r++) {
-    const cell = String(sheet.getRange(r, COL.ENTRY_ID).getValue()).trim();
-    if (cell === id) return r;
+  const count = lastRow - 1;
+  const ids = sheet.getRange(2, COL.ENTRY_ID, count, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === id) return i + 2;
   }
 
-  for (let r = 2; r <= lastRow; r++) {
-    const cell = String(sheet.getRange(r, LEGACY_ENTRY_ID_COL).getValue()).trim();
-    if (cell === id) return r;
+  const legacyIds = sheet.getRange(2, LEGACY_ENTRY_ID_COL, count, 1).getValues();
+  for (let i = 0; i < legacyIds.length; i++) {
+    if (String(legacyIds[i][0]).trim() === id) return i + 2;
   }
   return 0;
 }

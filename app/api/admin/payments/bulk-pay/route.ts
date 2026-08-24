@@ -3,11 +3,15 @@ import { ObjectId } from "mongodb";
 import { requireAdmin } from "@/lib/adminAuth";
 import { NOT_DELETED_MATCH } from "@/lib/entryAudit";
 import { getDb } from "@/lib/mongodb";
+import { healNamedApprovals } from "@/lib/healNamedApprovals";
 import { validatePaymentReference } from "@/lib/paymentReference";
+import { scheduleSheetsUpserts } from "@/lib/googleSheetsSync";
 import { markExpensePaymentPaid } from "@/lib/verifyExpensePayment";
 import type { PaymentVerifiedMethod } from "@/lib/types";
 
 const MAX_BULK = 50;
+
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
@@ -60,6 +64,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Paid to is required for cash" }, { status: 400 });
     }
 
+    await healNamedApprovals(db, businessId || undefined);
+
     const match: Record<string, unknown> = {
       type: "expense",
       ...NOT_DELETED_MATCH,
@@ -104,18 +110,38 @@ export async function POST(request: NextRequest) {
     let paidCount = 0;
     let paidAmount = 0;
     const errors: string[] = [];
+    const sheetJobs: Array<{
+      entryId: string;
+      entryDoc: Record<string, unknown>;
+      originalEntry: Record<string, unknown>;
+      adjustReason: string;
+    }> = [];
+    const ownerId = businessId || String(entries[0].businessId ?? "");
+    const adjustReason = `Paid via ${paymentMethod}${paymentReference ? ` — ${paymentReference}` : ""}`;
 
     for (const entry of entries) {
-      const result = await markExpensePaymentPaid(db, entry as Record<string, unknown>, adminName, {
-        paymentMethod,
-        paymentDate,
-        paymentReference,
-        paymentPaidTo: paidTo,
-        paymentNote: bulkNote,
-      });
+      const result = await markExpensePaymentPaid(
+        db,
+        entry as Record<string, unknown>,
+        adminName,
+        {
+          paymentMethod,
+          paymentDate,
+          paymentReference,
+          paymentPaidTo: paidTo,
+          paymentNote: bulkNote,
+        },
+        { deferSheets: true }
+      );
       if (result.ok) {
         paidCount += 1;
         paidAmount += Math.abs(Number(entry.amount) || 0);
+        sheetJobs.push({
+          entryId: String(entry._id),
+          entryDoc: result.entry,
+          originalEntry: entry as Record<string, unknown>,
+          adjustReason,
+        });
       } else {
         errors.push(`${entry.name}: ${result.error}`);
       }
@@ -128,10 +154,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const skipSheets = body.skipSheets === true;
+    if (!skipSheets && ownerId && sheetJobs.length > 0) {
+      scheduleSheetsUpserts(db, ownerId, sheetJobs);
+    }
+
     return NextResponse.json({
       paidCount,
       paidAmount,
       errors,
+      sheetsSyncStatus: "pending",
+      message: `Saved ${paidCount} payments in the app. Google Sheet is updating in the background — do not tap Sync All until it finishes.`,
     });
   } catch (error) {
     console.error("Bulk pay error:", error);

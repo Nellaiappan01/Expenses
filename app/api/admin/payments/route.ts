@@ -1,11 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
 import { requireAdmin } from "@/lib/adminAuth";
 import { NOT_DELETED_MATCH } from "@/lib/entryAudit";
 import { serializeEntry } from "@/lib/entrySerialize";
 import { findExpensePerson, normalizeExpensePeople } from "@/lib/expensePeople";
+import { healNamedApprovals } from "@/lib/healNamedApprovals";
 import { getDb } from "@/lib/mongodb";
-import type { PaymentStatus } from "@/lib/types";
+import { AWAITING_APPROVER_MATCH, AWAITING_PAYMENT_MATCH } from "@/lib/paymentWorkflow";
+
+function applyScope(
+  match: Record<string, unknown>,
+  scope: { businessId?: string; requestedBy?: string; from?: string; to?: string }
+) {
+  if (scope.businessId) match.businessId = scope.businessId;
+  if (scope.requestedBy) match.nameLower = scope.requestedBy.toLowerCase();
+  if (scope.from || scope.to) {
+    const dateMatch: Record<string, string> = {};
+    if (scope.from) dateMatch.$gte = scope.from;
+    if (scope.to) dateMatch.$lte = scope.to;
+    match.date = dateMatch;
+  }
+  return match;
+}
+
+async function sumAmount(db: Awaited<ReturnType<typeof getDb>>, match: Record<string, unknown>) {
+  const row = await db
+    .collection("entries")
+    .aggregate<{ count: number; amount: number }>([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          amount: { $sum: { $abs: "$amount" } },
+        },
+      },
+    ])
+    .toArray();
+  return row[0] ?? { count: 0, amount: 0 };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,119 +48,62 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const filter = searchParams.get("filter") ?? "payment_pending";
-    const businessId = searchParams.get("businessId")?.trim();
-    const requestedBy = searchParams.get("requestedBy")?.trim();
-    const from = searchParams.get("from")?.trim();
-    const to = searchParams.get("to")?.trim();
+    await healNamedApprovals(db, searchParams.get("businessId")?.trim() || undefined);
 
-    const match: Record<string, unknown> = {
+    const filter = searchParams.get("filter") ?? "payment_pending";
+    const scope = {
+      businessId: searchParams.get("businessId")?.trim() || undefined,
+      requestedBy: searchParams.get("requestedBy")?.trim() || undefined,
+      from: searchParams.get("from")?.trim() || undefined,
+      to: searchParams.get("to")?.trim() || undefined,
+    };
+
+    const listMatch: Record<string, unknown> = {
       type: "expense",
       ...NOT_DELETED_MATCH,
     };
-
-    if (businessId) {
-      match.businessId = businessId;
-    }
-    if (requestedBy) {
-      match.nameLower = requestedBy.toLowerCase();
-    }
-    if (from || to) {
-      const dateMatch: Record<string, string> = {};
-      if (from) dateMatch.$gte = from;
-      if (to) dateMatch.$lte = to;
-      match.date = dateMatch;
-    }
+    applyScope(listMatch, scope);
 
     if (filter === "approval_pending") {
-      match.approvalStatus = "pending";
+      Object.assign(listMatch, AWAITING_APPROVER_MATCH);
     } else if (filter === "payment_pending") {
-      match.approvalStatus = "approved";
-      match.paymentStatus = "pending";
+      Object.assign(listMatch, AWAITING_PAYMENT_MATCH);
     } else if (filter === "paid") {
-      match.paymentStatus = "paid";
+      listMatch.paymentStatus = "paid";
     } else if (filter === "all") {
-      match.$or = [
+      listMatch.$or = [
         { approvalStatus: { $in: ["pending", "approved"] } },
         { paymentStatus: { $in: ["pending", "paid"] } },
         { approvalStatus: { $exists: false }, paymentStatus: { $exists: false } },
       ];
     }
 
+    const approvalMatch = applyScope(
+      { ...NOT_DELETED_MATCH, ...AWAITING_APPROVER_MATCH },
+      scope
+    );
+    const paymentMatch = applyScope(
+      { ...NOT_DELETED_MATCH, ...AWAITING_PAYMENT_MATCH },
+      scope
+    );
+    const paidMatch = applyScope(
+      { type: "expense", ...NOT_DELETED_MATCH, paymentStatus: "paid" },
+      scope
+    );
+
     const entries = await db
       .collection("entries")
-      .find(match)
-      .sort({ approvedAt: -1, createdAt: -1 })
+      .find(listMatch)
+      .sort({ date: -1, createdAt: -1 })
       .limit(200)
       .toArray();
 
-    const baseMatch: Record<string, unknown> = { type: "expense", ...NOT_DELETED_MATCH };
-    if (businessId) baseMatch.businessId = businessId;
-
-    const pendingMatch: Record<string, unknown> = {
-      type: "expense",
-      ...NOT_DELETED_MATCH,
-      approvalStatus: "approved",
-      paymentStatus: "pending",
-    };
-    if (businessId) pendingMatch.businessId = businessId;
-    if (requestedBy) pendingMatch.nameLower = requestedBy.toLowerCase();
-    if (from || to) {
-      const dateMatch: Record<string, string> = {};
-      if (from) dateMatch.$gte = from;
-      if (to) dateMatch.$lte = to;
-      pendingMatch.date = dateMatch;
-    }
-
-    const paidMatch: Record<string, unknown> = {
-      type: "expense",
-      ...NOT_DELETED_MATCH,
-      paymentStatus: "paid",
-    };
-    if (businessId) paidMatch.businessId = businessId;
-    if (requestedBy) paidMatch.nameLower = requestedBy.toLowerCase();
-    if (from || to) {
-      const dateMatch: Record<string, string> = {};
-      if (from) dateMatch.$gte = from;
-      if (to) dateMatch.$lte = to;
-      paidMatch.date = dateMatch;
-    }
-
-    const [approvalPending, paymentPending, paidCount, pendingTotalRow, paidTotalRow, requestedByRows] =
+    const [approvalTotal, pendingTotal, paidTotal, filteredTotal, requestedByRows] =
       await Promise.all([
-        db.collection("entries").countDocuments({ ...baseMatch, approvalStatus: "pending" }),
-        db.collection("entries").countDocuments({
-          ...baseMatch,
-          approvalStatus: "approved",
-          paymentStatus: "pending",
-        }),
-        db.collection("entries").countDocuments({ ...baseMatch, paymentStatus: "paid" }),
-        db
-          .collection("entries")
-          .aggregate<{ count: number; amount: number }>([
-            { $match: pendingMatch },
-            {
-              $group: {
-                _id: null,
-                count: { $sum: 1 },
-                amount: { $sum: { $abs: "$amount" } },
-              },
-            },
-          ])
-          .toArray(),
-        db
-          .collection("entries")
-          .aggregate<{ count: number; amount: number }>([
-            { $match: paidMatch },
-            {
-              $group: {
-                _id: null,
-                count: { $sum: 1 },
-                amount: { $sum: { $abs: "$amount" } },
-              },
-            },
-          ])
-          .toArray(),
+        sumAmount(db, approvalMatch),
+        sumAmount(db, paymentMatch),
+        sumAmount(db, paidMatch),
+        sumAmount(db, listMatch),
         db
           .collection("entries")
           .aggregate<{ name: string }>([
@@ -138,8 +113,6 @@ export async function GET(request: NextRequest) {
           ])
           .toArray(),
       ]);
-    const pendingTotal = pendingTotalRow[0] ?? { count: 0, amount: 0 };
-    const paidTotal = paidTotalRow[0] ?? { count: 0, amount: 0 };
 
     const users = await db
       .collection("users")
@@ -178,18 +151,14 @@ export async function GET(request: NextRequest) {
         name: u.name || u.username || u.userId,
       })),
       requestedByNames: requestedByRows.map((row) => row.name).filter(Boolean),
-      pendingTotal: {
-        count: pendingTotal.count,
-        amount: pendingTotal.amount,
-      },
-      paidTotal: {
-        count: paidTotal.count,
-        amount: paidTotal.amount,
-      },
+      pendingTotal,
+      paidTotal,
+      approvalTotal,
+      filteredTotal,
       counts: {
-        approvalPending,
-        paymentPending,
-        paid: paidCount,
+        approvalPending: approvalTotal.count,
+        paymentPending: pendingTotal.count,
+        paid: paidTotal.count,
       },
     });
   } catch (error) {
