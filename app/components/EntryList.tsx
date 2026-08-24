@@ -7,10 +7,10 @@ import { cachedApiJson, cacheKey, notifyLedgerDataChanged, readClientCache } fro
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
 import type { Entry } from "@/lib/types";
-import { canUserModifyEntry } from "@/lib/paymentWorkflow";
+import { canUserModifyEntry, entryLockShortLabel } from "@/lib/paymentWorkflow";
 import { PaymentStatusBadge, PaymentStatusDetail } from "./payments/PaymentStatus";
 import ApproveOnSiteSheet from "./payments/ApproveOnSiteSheet";
-import EditEntrySheet, { EditIcon, LockIcon, TrashIcon } from "./EditEntrySheet";
+import EditEntrySheet, { EditIcon, TrashIcon } from "./EditEntrySheet";
 import { useUser } from "../context/UserContext";
 
 function formatDate(isoDate: string) {
@@ -30,7 +30,7 @@ export default function EntryList({
   readOnly?: boolean;
   onRefresh?: () => void;
 }) {
-  const { userName } = useUser();
+  const { userName, userId } = useUser();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -40,6 +40,11 @@ export default function EntryList({
   const [bankOptions, setBankOptions] = useState<string[]>([]);
 
   const fetchEntries = useCallback(async () => {
+    if (!userId) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
     try {
       let url: string;
       if (limit) {
@@ -55,7 +60,10 @@ export default function EntryList({
       }
 
       const hasCache = readClientCache<Entry[] | { entries: Entry[] }>(cacheKey(url)) !== null;
-      if (!hasCache) setLoading(true);
+      if (!hasCache) {
+        setEntries([]);
+        setLoading(true);
+      }
 
       const { data } = await cachedApiJson<Entry[] | { entries: Entry[]; hasMore?: boolean }>(
         url,
@@ -67,23 +75,27 @@ export default function EntryList({
         if (limit && !Array.isArray(data)) {
           setHasMoreFromApi(!!data.hasMore);
         }
+      } else {
+        setEntries([]);
       }
     } catch (err) {
       console.error("Failed to fetch entries:", err);
+      setEntries([]);
     } finally {
       setLoading(false);
     }
-  }, [limit, todayOnly]);
+  }, [limit, todayOnly, userId]);
 
   useEffect(() => {
     apiFetch("/api/defaults")
       .then((r) => (r.ok ? r.json() : { banks: [] }))
       .then((d) => setBankOptions(d.banks ?? []));
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
+    setEntries([]);
     fetchEntries();
-  }, [fetchEntries, refreshTrigger]);
+  }, [fetchEntries, refreshTrigger, userId]);
 
   const hasMore = limit ? hasMoreFromApi : false;
 
@@ -201,8 +213,8 @@ export default function EntryList({
                           {formatEntryAmount(entry.amount, entry.type)}
                         </p>
                         {!readOnly && !canModify && (
-                          <span className="text-amber-700 dark:text-amber-500" aria-label="Entry locked" title="Locked">
-                            <LockIcon className="h-4 w-4" />
+                          <span className="max-w-[7.5rem] text-right text-[10px] font-semibold leading-tight text-amber-800">
+                            {entryLockShortLabel(entry)}
                           </span>
                         )}
                         <svg

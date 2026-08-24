@@ -44,6 +44,8 @@ export interface Entry {
   paymentVerifiedBy?: string;
   paymentVerifiedAt?: Date;
   paymentNote?: string;
+  /** User dismissed the home "approved and paid" banner for this entry. */
+  paymentNotificationHidden?: boolean;
   attachmentUrl?: string;
   attachmentPublicId?: string;
   tags?: string[];

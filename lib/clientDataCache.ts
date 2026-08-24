@@ -1,4 +1,5 @@
 import { apiFetch } from "./api";
+import { clearBalanceCache } from "./balanceClient";
 
 type CacheEntry = {
   data: unknown;
@@ -6,9 +7,28 @@ type CacheEntry = {
 };
 
 const memory = new Map<string, CacheEntry>();
+const USER_KEY = "ledger_user_id";
+
+function currentUserTag() {
+  if (typeof window === "undefined") return "anon";
+  try {
+    const stored = localStorage.getItem(USER_KEY);
+    if (!stored) return "anon";
+    const data = JSON.parse(stored) as { userId?: string };
+    return data.userId || "anon";
+  } catch {
+    return "anon";
+  }
+}
 
 export function cacheKey(url: string, method = "GET") {
-  return `${method}:${url}`;
+  return `${currentUserTag()}:${method}:${url}`;
+}
+
+/** Drop every in-memory/session ledger cache. Call on login, logout, and user switch. */
+export function resetSessionCaches() {
+  memory.clear();
+  clearBalanceCache();
 }
 
 export function readClientCache<T>(key: string): T | null {

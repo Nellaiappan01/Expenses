@@ -230,7 +230,7 @@ type StringListField = Exclude<keyof DefaultsState, "expensePeople">;
         banks: saved.banks ?? [],
       });
       setMessage("Defaults saved — entry form updated.");
-      window.dispatchEvent(new Event("defaults-updated"));
+      window.dispatchEvent(new Event("ledger-defaults-updated"));
       setTimeout(() => setMessage(""), 4000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save. Check your connection.");
@@ -308,20 +308,9 @@ type StringListField = Exclude<keyof DefaultsState, "expensePeople">;
           />
 
           <DefaultsListSection
-            title="Tags"
-            hint="Optional tags on expense entries (comma-separated on form)."
-            placeholder="Add tag"
-            items={data.expenseTags}
-            draft={drafts.tag ?? ""}
-            onDraftChange={(v) => setDraft("tag", v)}
-            onAdd={() => addItem("expenseTags", "tag")}
-            onRemove={(i) => removeItem("expenseTags", i)}
-          />
-
-          <DefaultsListSection
-            title="Quick notes"
-            hint="Suggested notes you can pick when entering expenses."
-            placeholder="Add note"
+            title="Expense notes"
+            hint="Add notes here, then Save defaults. They show as tap chips on Home. A note typed on an expense stays on that expense only."
+            placeholder="Add expense note"
             items={data.notes}
             draft={drafts.note ?? ""}
             onDraftChange={(v) => setDraft("note", v)}

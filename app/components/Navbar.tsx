@@ -16,9 +16,29 @@ const stockNavItems = [
   { href: "/stock/dashboard", label: "Report", icon: DashboardIcon },
 ];
 
+function PayIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={active ? 2.5 : 2}
+        d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+      />
+    </svg>
+  );
+}
+
 const ledgerNavItems = [
   { href: "/", label: "Home", icon: HomeIcon, ledger: true },
   { href: "/totals", label: "Totals", icon: TotalsIcon, ledger: true },
+  { href: "/track", label: "Track", icon: TrackIcon, ledger: true },
+  { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
+];
+
+const adminLedgerNavItems = [
+  { href: "/", label: "Home", icon: HomeIcon, ledger: true },
+  { href: "/admin/payments", label: "Pay", icon: PayIcon },
   { href: "/track", label: "Track", icon: TrackIcon, ledger: true },
   { href: "/report", label: "Report", icon: ReportIcon, ledger: true },
 ];
@@ -110,7 +130,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { config } = useConfig() ?? {};
-  const { userId, username } = useUser();
+  const { userId, username, isAdmin } = useUser();
 
   if (pathname === "/select-user") return null;
 
@@ -133,12 +153,12 @@ export default function Navbar() {
             ...(viewPath ? [{ href: viewPath, label: "View", icon: ViewIcon }] : []),
             stockNavItems[3],
           ]
-        : ledgerNavItems.filter((item) => {
+        : (isAdmin ? adminLedgerNavItems : ledgerNavItems).filter((item) => {
             const hasLedger = features.expenses || features.workers;
             if ("ledger" in item && item.ledger) return hasLedger;
             return true;
           }),
-    [useStockBar, viewPath, features.expenses, features.workers]
+    [useStockBar, viewPath, features.expenses, features.workers, isAdmin]
   );
 
   useEffect(() => {
@@ -148,7 +168,11 @@ export default function Navbar() {
   }, [router, navItems]);
 
   const isActive = (href: string) =>
-    useStockBar ? stockPathActive(pathname, href, viewPath) : pathname === href || (href !== "/" && pathname.startsWith(href));
+    useStockBar
+      ? stockPathActive(pathname, href, viewPath)
+      : href === "/admin/payments"
+        ? pathname.startsWith("/admin/payments")
+        : pathname === href || (href !== "/" && pathname.startsWith(href));
 
   const activeColor = useStockBar ? "#059669" : "#0B4A8C";
   const activeBg = useStockBar ? "#ECFDF5" : "#EEF5FC";

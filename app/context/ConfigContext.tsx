@@ -107,8 +107,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       setConfig(null);
       return;
     }
-    const cached = readConfigCache(userId);
-    if (cached) setConfig(cached);
+    setConfig(readConfigCache(userId));
     refresh();
   }, [userId, refresh]);
 

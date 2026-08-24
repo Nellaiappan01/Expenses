@@ -118,12 +118,25 @@ export function entryModifyLockReason(entry: {
     return "This request was rejected and cannot be changed.";
   }
   if (entry.paymentStatus === "paid") {
-    return "Paid and verified — locked. No further edits.";
+    return "Admin marked this as paid / verified. Date, amount, and other fields cannot be changed.";
   }
   if (entry.approvalStatus === "approved") {
-    return "Approved on site — locked until admin verifies payment.";
+    return "Approved on site — waiting for admin payment. Date and amount cannot be changed until then.";
   }
   return "This entry cannot be changed.";
+}
+
+/** Short status for lists — words instead of a lock icon. */
+export function entryLockShortLabel(entry: {
+  type?: string;
+  approvalStatus?: ApprovalStatus;
+  paymentStatus?: PaymentStatus;
+}): string | null {
+  if (canUserModifyEntry(entry)) return null;
+  if (entry.paymentStatus === "paid") return "Paid / verified — cannot edit";
+  if (entry.approvalStatus === "rejected") return "Rejected — cannot edit";
+  if (entry.approvalStatus === "approved") return "Waiting payment — cannot edit";
+  return "Cannot edit";
 }
 
 /** MongoDB $cond expression: sum expense only when paid (legacy = paid). */

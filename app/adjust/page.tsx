@@ -4,11 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import { formatDateDDMMYYYY } from "@/lib/dateFormat";
+import { formatDateDDMMYYYY, toDateInputValue } from "@/lib/dateFormat";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
 import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
 import type { Entry, PaymentMethod } from "@/lib/types";
-import { canUserModifyEntry, entryModifyLockReason } from "@/lib/paymentWorkflow";
+import {
+  canUserModifyEntry,
+  entryLockShortLabel,
+  entryModifyLockReason,
+} from "@/lib/paymentWorkflow";
 import {
   amountInputClass,
   btnDeleteClass,
@@ -54,6 +58,7 @@ export default function AdjustPage() {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("Cash");
   const [note, setNote] = useState("");
+  const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
   const [expenseCategoryOptions, setExpenseCategoryOptions] = useState<string[]>([]);
   const [workerCategoryOptions, setWorkerCategoryOptions] = useState<string[]>([]);
@@ -122,6 +127,7 @@ export default function AdjustPage() {
     setAmount(String(Math.abs(entry.amount)));
     setMethod(entry.method);
     setNote(entry.note ?? "");
+    setDate(toDateInputValue(entry.date));
     setBankName(entry.bankName ?? "");
     setReason("");
     setError("");
@@ -168,6 +174,7 @@ export default function AdjustPage() {
     }
     if (normalizedAmount !== selected.amount) payload.amount = normalizedAmount;
     if (method !== selected.method) payload.method = method;
+    if (date && date !== toDateInputValue(selected.date)) payload.date = date;
     if ((note.trim() || "") !== (selected.note ?? "")) payload.note = note.trim();
     if (method === "Bank" && bankName.trim() !== (selected.bankName ?? "")) {
       payload.bankName = bankName.trim();
@@ -193,6 +200,11 @@ export default function AdjustPage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!selected || saving) return;
+
+    if (!date) {
+      showFeedback("Entry date is required.", true);
+      return;
+    }
 
     if (!reason.trim()) {
       showFeedback("Please fill in Reason — it is required for every adjustment.", true);
@@ -369,7 +381,9 @@ export default function AdjustPage() {
             <p className="px-1 text-xs font-semibold uppercase tracking-wide text-[#5A6B7D]">
               {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}
             </p>
-            {searchResults.map((entry) => (
+            {searchResults.map((entry) => {
+              const lockHint = entryLockShortLabel(entry);
+              return (
               <button
                 key={entry._id}
                 type="button"
@@ -379,6 +393,13 @@ export default function AdjustPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-[#1A2B3C]">{entry.name}</p>
                   <p className="mt-0.5 text-xs text-[#5A6B7D]">{entrySummary(entry)}</p>
+                  {lockHint ? (
+                    <p className="mt-1 text-[10px] font-semibold text-amber-800">{lockHint}</p>
+                  ) : (
+                    <p className="mt-1 text-[10px] font-medium text-[#2563EB]">
+                      Tap to change date, amount, or other details
+                    </p>
+                  )}
                 </div>
                 <p
                   className={`ml-3 shrink-0 font-semibold tabular-nums ${entryAmountColorClass(entry)}`}
@@ -386,7 +407,8 @@ export default function AdjustPage() {
                   {formatEntryAmount(entry.amount, entry.type)}
                 </p>
               </button>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -439,7 +461,14 @@ export default function AdjustPage() {
 
             {entryLocked && lockReason && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                {lockReason}
+                <p className="font-semibold">
+                  {selected.paymentStatus === "paid"
+                    ? "Paid / verified — cannot edit"
+                    : selected.approvalStatus === "rejected"
+                      ? "Rejected — cannot edit"
+                      : "Waiting for admin payment — cannot edit"}
+                </p>
+                <p className="mt-0.5 text-xs leading-snug">{lockReason}</p>
               </div>
             )}
 
@@ -491,6 +520,37 @@ export default function AdjustPage() {
             )}
 
             <div>
+              <label htmlFor="adjust-date" className={labelClass}>
+                Entry date <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="adjust-date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  required
+                  disabled={entryLocked}
+                  className={`${inputClassSm} pr-11 ${entryLocked ? "bg-[#F4F8FC] text-[#5A6B7D]" : ""}`}
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#5A6B7D]" aria-hidden>
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    />
+                  </svg>
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-[#5A6B7D]">
+                {entryLocked
+                  ? "Date cannot be changed on paid or approved entries."
+                  : "Tap the date to pick a different day."}
+              </p>
+            </div>
+
+            <div>
               <label htmlFor="adjust-amount" className={labelClass}>
                 Amount <span className="text-red-500">*</span>
               </label>
@@ -501,11 +561,12 @@ export default function AdjustPage() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
                 required
+                disabled={entryLocked}
                 className={amountInputClass}
               />
             </div>
 
-            <WalletPaymentToggle value={method} onChange={setMethod} />
+            <WalletPaymentToggle value={method} onChange={setMethod} disabled={entryLocked} />
 
             {method === "Bank" && (
               <div>
@@ -517,6 +578,7 @@ export default function AdjustPage() {
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
                   required
+                  disabled={entryLocked}
                   className={inputClassSm}
                 >
                   <option value="">Select bank</option>
@@ -539,6 +601,7 @@ export default function AdjustPage() {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Optional note…"
+                disabled={entryLocked}
                 className={inputClassSm}
               />
             </div>

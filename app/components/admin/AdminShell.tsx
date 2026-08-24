@@ -38,12 +38,12 @@ export default function AdminShell({
   ];
 
   return (
-    <div className="min-h-screen bg-[#F4F8FC]">
-      <div className="mx-auto max-w-lg px-3 py-4 pb-24 sm:px-4">
-        <header className="mb-4 flex items-center gap-3">
+    <div className="min-h-[100dvh] bg-[#F4F8FC] pt-[env(safe-area-inset-top)]">
+      <div className="mx-auto w-full max-w-3xl px-3 py-3 pb-28 sm:px-4 sm:py-4">
+        <header className="mb-3 flex items-center gap-3 sm:mb-4">
           <Link
             href="/"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#D6E6F5] bg-white text-[#0B4A8C] shadow-sm hover:bg-[#F8FBFE]"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#D6E6F5] bg-white text-[#0B4A8C] shadow-sm hover:bg-[#F8FBFE]"
             aria-label="Back to home"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -51,20 +51,20 @@ export default function AdminShell({
             </svg>
           </Link>
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold text-[#0B4A8C]">{title}</h1>
-            <p className="text-sm text-[#5A7FA5]">{subtitle}</p>
+            <h1 className="truncate text-lg font-bold text-[#0B4A8C] sm:text-xl">{title}</h1>
+            <p className="text-xs text-[#5A7FA5] sm:text-sm">{subtitle}</p>
           </div>
         </header>
 
         <nav
-          className="mb-4 flex gap-2 rounded-2xl border border-[#D6E6F5] bg-white p-1.5 shadow-sm"
+          className="mb-3 grid grid-cols-2 gap-1 rounded-2xl border border-[#D6E6F5] bg-white p-1 shadow-sm sm:mb-4 sm:p-1.5"
           aria-label="Admin sections"
         >
           {tabs.map((tab) => (
             <Link
               key={tab.id}
               href={tab.href}
-              className={`flex-1 rounded-xl py-2.5 text-center text-sm font-semibold transition-colors ${
+              className={`rounded-xl py-3 text-center text-sm font-semibold transition-colors ${
                 active === tab.id
                   ? "bg-[#0B4A8C] text-white shadow-sm"
                   : "text-[#5A7FA5] hover:bg-[#F4F8FC]"

@@ -52,7 +52,10 @@ export default function TotalsPage() {
     if (to) params.set("to", to);
     const url = `/api/totals?${params}`;
     const hasCache = readClientCache<TotalsBreakdown>(cacheKey(url)) !== null;
-    if (!hasCache) setLoading(true);
+    if (!hasCache) {
+      setTotals(EMPTY_TOTALS);
+      setLoading(true);
+    }
     try {
       const { data } = await cachedApiJson<TotalsBreakdown>(url, 60_000);
       if (data) setTotals({ ...EMPTY_TOTALS, ...data });

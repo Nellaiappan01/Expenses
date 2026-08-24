@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import { serializeEntry } from "@/lib/entrySerialize";
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
         type: "expense",
         paymentStatus: "paid",
         paymentVerifiedAt: { $gte: since },
+        paymentNotificationHidden: { $ne: true },
         deleted: { $ne: true },
       })
       .sort({ paymentVerifiedAt: -1 })
@@ -44,5 +46,37 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Payment notifications error:", error);
     return NextResponse.json({ notifications: [] });
+  }
+}
+
+/** Hide a paid notification after the user taps Dismiss. */
+export async function POST(request: NextRequest) {
+  try {
+    const userId = await getUserId(request);
+    const body = await request.json().catch(() => ({}));
+    const entryId = typeof body.entryId === "string" ? body.entryId.trim() : "";
+    if (!entryId || !ObjectId.isValid(entryId)) {
+      return NextResponse.json({ error: "Invalid entry" }, { status: 400 });
+    }
+
+    const db = await getDb();
+    const result = await db.collection("entries").updateOne(
+      {
+        _id: new ObjectId(entryId),
+        businessId: userId,
+        type: "expense",
+        deleted: { $ne: true },
+      },
+      { $set: { paymentNotificationHidden: true } }
+    );
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("Dismiss payment notification error:", error);
+    return NextResponse.json({ error: "Could not dismiss" }, { status: 500 });
   }
 }

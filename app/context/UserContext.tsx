@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { apiFetch } from "@/lib/api";
+import { resetSessionCaches } from "@/lib/clientDataCache";
 
 const USER_KEY = "ledger_user_id";
 
@@ -106,6 +107,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     username?: string;
     isAdmin?: boolean;
   }) => {
+    resetSessionCaches();
     setUserId(data.userId);
     setUserName(data.userName || data.userId);
     setUsername((data.username || data.userId).toLowerCase());
@@ -123,6 +125,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearUser = useCallback(() => {
+    resetSessionCaches();
     setUserId(null);
     setUserName(null);
     setUsername(null);

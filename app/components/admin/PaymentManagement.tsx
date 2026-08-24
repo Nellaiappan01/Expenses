@@ -8,6 +8,7 @@ import {
   formatBankDetailsText,
   paymentMethodFromPerson,
 } from "@/lib/expensePeople";
+import { validatePaymentReference } from "@/lib/paymentReference";
 import { requestLabel } from "@/lib/paymentWorkflow";
 import type { Entry, ExpensePerson, PaymentVerifiedMethod } from "@/lib/types";
 
@@ -16,6 +17,7 @@ type PaymentFilter = "payment_pending" | "paid" | "approval_pending" | "all";
 type PaymentEntry = Entry & { businessName?: string; payee?: ExpensePerson };
 
 const PAYMENT_METHODS: PaymentVerifiedMethod[] = ["Cash", "GPay / UPI", "Bank Transfer"];
+const DEFAULT_GPAY_NOTE = "Paid GPay";
 
 export default function PaymentManagement({ dashboard = false }: { dashboard?: boolean }) {
   const [filter, setFilter] = useState<PaymentFilter>("payment_pending");
@@ -44,6 +46,15 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
   const [paymentPaidTo, setPaymentPaidTo] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [requestedBy, setRequestedBy] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [requestedByNames, setRequestedByNames] = useState<string[]>([]);
+  const [pendingTotal, setPendingTotal] = useState({ count: 0, amount: 0 });
+  const [paidTotal, setPaidTotal] = useState({ count: 0, amount: 0 });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showBulk, setShowBulk] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
@@ -54,18 +65,31 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     try {
       const params = new URLSearchParams({ filter });
       if (businessId) params.set("businessId", businessId);
+      if (requestedBy) params.set("requestedBy", requestedBy);
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
       const res = await apiFetch(`/api/admin/payments?${params}`);
       if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
-      setEntries(data.entries ?? []);
+      const nextEntries = (data.entries ?? []) as PaymentEntry[];
+      setEntries(nextEntries);
       setUsers(data.users ?? []);
+      setRequestedByNames(data.requestedByNames ?? []);
+      if (data.pendingTotal) setPendingTotal(data.pendingTotal);
+      if (data.paidTotal) setPaidTotal(data.paidTotal);
+      else setPaidTotal({ count: 0, amount: 0 });
       if (data.counts) setCounts(data.counts);
+      const pendingIds = nextEntries
+        .filter((entry) => entry.approvalStatus !== "pending" && entry.paymentStatus !== "paid")
+        .map((entry) => entry._id)
+        .filter((id): id is string => Boolean(id));
+      setSelectedIds(requestedBy ? pendingIds : []);
     } catch {
       setError("Could not load payment list");
     } finally {
       setLoading(false);
     }
-  }, [filter, businessId]);
+  }, [filter, businessId, requestedBy, fromDate, toDate]);
 
   useEffect(() => {
     load();
@@ -83,13 +107,19 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     return () => clearTimeout(t);
   }, [copyMsg]);
 
+  function choosePaymentMethod(method: PaymentVerifiedMethod) {
+    setPaymentMethod(method);
+    if (method === "GPay / UPI") setPaymentReference(DEFAULT_GPAY_NOTE);
+    else if (method === "Bank Transfer") setPaymentReference("");
+  }
+
   function openVerify(entry: PaymentEntry) {
     const payee = entry.payee;
     const method = paymentMethodFromPerson(payee);
     setVerifyEntry(entry);
-    setPaymentMethod(method);
+    choosePaymentMethod(method);
     setPaymentDate(new Date().toISOString().split("T")[0]);
-    setPaymentReference("");
+    if (method !== "GPay / UPI") setPaymentReference("");
     setPaymentPaidTo(method === "Cash" ? entry.name : "");
     setPaymentNote("");
     setError("");
@@ -183,6 +213,19 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
   async function handleVerify() {
     if (!verifyEntry || saving) return;
+    if (!paymentDate) {
+      setError("Payment date is required");
+      return;
+    }
+    if (paymentMethod === "Cash" && !paymentPaidTo.trim()) {
+      setError("Paid to is required for cash");
+      return;
+    }
+    const referenceCheck = validatePaymentReference(paymentMethod, paymentReference);
+    if (!referenceCheck.ok) {
+      setError(referenceCheck.error);
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -194,7 +237,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           paymentDate,
           paymentReference:
             paymentMethod === "Bank Transfer" || paymentMethod === "GPay / UPI"
-              ? paymentReference
+              ? referenceCheck.value
               : undefined,
           paymentPaidTo: paymentMethod === "Cash" ? paymentPaidTo : undefined,
           paymentNote: paymentNote || undefined,
@@ -212,9 +255,72 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     }
   }
 
+  function toggleSelected(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  }
+
+  async function handleBulkPay() {
+    if (saving) return;
+    if (!requestedBy && selectedIds.length === 0) {
+      setError("Select a Requested by person, or tick the pending entries to pay");
+      return;
+    }
+    if (!paymentDate) {
+      setError("Payment date is required");
+      return;
+    }
+    if (paymentMethod === "Cash" && !paymentPaidTo.trim() && !requestedBy) {
+      setError("Paid to is required for cash");
+      return;
+    }
+    const referenceCheck = validatePaymentReference(paymentMethod, paymentReference);
+    if (!referenceCheck.ok) {
+      setError(referenceCheck.error);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/admin/payments/bulk-pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestedBy: requestedBy || undefined,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+          businessId: businessId || undefined,
+          ids: selectedIds,
+          paymentMethod,
+          paymentDate,
+          paymentReference:
+            paymentMethod === "Bank Transfer" || paymentMethod === "GPay / UPI"
+              ? referenceCheck.value
+              : undefined,
+          paymentPaidTo:
+            paymentMethod === "Cash" ? paymentPaidTo.trim() || requestedBy : undefined,
+          paymentNote: paymentNote || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Bulk pay failed");
+      setSuccess(
+        `Marked ${data.paidCount} payment${data.paidCount === 1 ? "" : "s"} as paid — ₹${Number(data.paidAmount || 0).toLocaleString("en-IN")}`
+      );
+      setShowBulk(false);
+      setPaymentReference("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bulk pay failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const filters: { id: PaymentFilter; label: string }[] = [
-    { id: "payment_pending", label: "Payment Pending" },
-    { id: "approval_pending", label: "User — missing approver" },
+    { id: "payment_pending", label: "To pay" },
+    { id: "approval_pending", label: "Need approver" },
     { id: "paid", label: "Paid" },
     { id: "all", label: "All" },
   ];
@@ -224,11 +330,23 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     : "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900";
 
   const verifyAmount = verifyEntry ? Math.abs(verifyEntry.amount) : 0;
+  const selectedPendingAmount = entries
+    .filter((entry) => entry._id && selectedIds.includes(entry._id))
+    .reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
   const payee = verifyEntry?.payee;
   const upiUrl =
     payee?.upiId && verifyEntry
-      ? buildUpiPayUrl({ upiId: payee.upiId, name: payee.name, amount: verifyAmount })
+      ? buildUpiPayUrl({
+          upiId: payee.upiId,
+          name: payee.name,
+          amount: verifyAmount,
+          note: requestLabel(verifyEntry).slice(0, 50),
+        })
       : null;
+  const upiReferenceCheck =
+    paymentMethod === "GPay / UPI" || paymentMethod === "Bank Transfer"
+      ? validatePaymentReference(paymentMethod, paymentReference)
+      : { ok: true as const, value: "" };
   const bankDetails = payee ? formatBankDetailsText(payee) : "";
 
   return (
@@ -250,38 +368,38 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           <button
             type="button"
             onClick={() => setFilter("approval_pending")}
-            className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-left"
+            className="min-h-[4.5rem] rounded-2xl border border-amber-200 bg-amber-50 px-2 py-2.5 text-left active:scale-[0.99]"
           >
-            <p className="text-[10px] font-semibold uppercase text-amber-800">User pending</p>
-            <p className="text-xl font-bold text-amber-900">{counts.approvalPending}</p>
+            <p className="text-[10px] font-semibold uppercase leading-tight text-amber-800">Need approver</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">{counts.approvalPending}</p>
           </button>
           <button
             type="button"
             onClick={() => setFilter("payment_pending")}
-            className="rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-left"
+            className="min-h-[4.5rem] rounded-2xl border border-yellow-200 bg-yellow-50 px-2 py-2.5 text-left active:scale-[0.99]"
           >
-            <p className="text-[10px] font-semibold uppercase text-yellow-800">To pay</p>
-            <p className="text-xl font-bold text-yellow-900">{counts.paymentPending}</p>
+            <p className="text-[10px] font-semibold uppercase leading-tight text-yellow-800">To pay</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-yellow-900">{counts.paymentPending}</p>
           </button>
           <button
             type="button"
             onClick={() => setFilter("paid")}
-            className="rounded-xl border border-green-200 bg-green-50 p-3 text-left"
+            className="min-h-[4.5rem] rounded-2xl border border-green-200 bg-green-50 px-2 py-2.5 text-left active:scale-[0.99]"
           >
-            <p className="text-[10px] font-semibold uppercase text-green-800">Paid</p>
-            <p className="text-xl font-bold text-green-900">{counts.paid}</p>
+            <p className="text-[10px] font-semibold uppercase leading-tight text-green-800">Paid</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-green-900">{counts.paid}</p>
           </button>
         </div>
       )}
 
-      <div className={`${dashboard ? "rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm" : ""}`}>
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className={`${dashboard ? "rounded-2xl border border-[#D6E6F5] bg-white p-3 shadow-sm sm:p-4" : ""}`}>
+      <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {filters.map((f) => (
           <button
             key={f.id}
             type="button"
             onClick={() => setFilter(f.id)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+            className={`shrink-0 rounded-full px-3.5 py-2.5 text-xs font-semibold ${
               filter === f.id
                 ? "bg-[#0B4A8C] text-white"
                 : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
@@ -299,7 +417,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
         <select
           value={businessId}
           onChange={(e) => setBusinessId(e.target.value)}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
         >
           <option value="">All accounts</option>
           {users.map((u) => (
@@ -307,10 +425,111 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
               {u.name}
             </option>
           ))}
-        </select>
-      </div>
+          </select>
+        </div>
 
-      {error && !verifyEntry && (
+        <div className="mb-3">
+          <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            Requested by <span className="font-normal text-zinc-400">(needed for bulk pay)</span>
+          </label>
+          <select
+            value={requestedBy}
+            onChange={(e) => setRequestedBy(e.target.value)}
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          >
+            <option value="">All people</option>
+            {requestedByNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-600">From date</label>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-600">To date</label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm"
+            />
+          </div>
+        </div>
+
+        {requestedBy && pendingTotal.count > 0 && filter !== "paid" ? (
+          <div className="mb-3 rounded-2xl border border-yellow-200 bg-yellow-50 px-3 py-3">
+            <p className="text-sm font-semibold text-yellow-950">
+              {requestedBy} · {pendingTotal.count} pending · ₹
+              {pendingTotal.amount.toLocaleString("en-IN")}
+            </p>
+            <p className="mt-0.5 text-[11px] text-yellow-800">
+              {fromDate || toDate
+                ? `Dates ${fromDate || "…"} to ${toDate || "…"}`
+                : "All dates for this person"}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setFilter("payment_pending");
+                setPaymentMethod("Cash");
+                setPaymentPaidTo(requestedBy);
+                setPaymentDate(new Date().toISOString().split("T")[0]);
+                setPaymentReference("");
+                setPaymentNote("");
+                setShowBulk(true);
+                setVerifyEntry(null);
+                setEditEntry(null);
+              }}
+              className="mt-2 w-full rounded-xl bg-[#0B4A8C] py-2.5 text-sm font-bold text-white"
+            >
+              Mark {selectedIds.length || pendingTotal.count} as paid
+            </button>
+          </div>
+        ) : filter === "paid" && requestedBy && fromDate && toDate && paidTotal.count > 0 ? (
+          <div className="mb-3 rounded-2xl border border-green-200 bg-green-50 px-3 py-3">
+            <p className="text-sm font-semibold text-green-950">
+              {requestedBy} · {paidTotal.count} paid · ₹
+              {paidTotal.amount.toLocaleString("en-IN")}
+            </p>
+            <p className="mt-0.5 text-[11px] text-green-800">
+              {formatDateDDMMYYYY(fromDate)} to {formatDateDDMMYYYY(toDate)}
+            </p>
+          </div>
+        ) : filter === "paid" && requestedBy && paidTotal.count > 0 ? (
+          <div className="mb-3 rounded-2xl border border-green-200 bg-green-50 px-3 py-3">
+            <p className="text-sm font-semibold text-green-950">
+              {requestedBy} · {paidTotal.count} paid · ₹
+              {paidTotal.amount.toLocaleString("en-IN")}
+            </p>
+            <p className="mt-0.5 text-[11px] text-green-800">
+              {fromDate || toDate
+                ? `${fromDate ? formatDateDDMMYYYY(fromDate) : "…"} to ${toDate ? formatDateDDMMYYYY(toDate) : "…"}`
+                : "All dates — pick from and to for a period total"}
+            </p>
+          </div>
+        ) : filter === "paid" && !requestedBy ? (
+          <p className="mb-3 rounded-xl border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-600">
+            Pick Requested by and from/to dates to see that person&apos;s paid total for the period.
+          </p>
+        ) : filter === "payment_pending" ? (
+          <p className="mb-3 rounded-xl border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-600">
+            Pick a name in Requested by. Then this box shows that person&apos;s pending count and
+            amount for bulk pay. Account can stay All accounts.
+          </p>
+        ) : null}
+
+      {error && !verifyEntry && !showBulk && (
         <p className="mb-2 text-sm text-red-600" role="alert">
           {error}
         </p>
@@ -328,92 +547,137 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
       ) : entries.length === 0 ? (
         <p className="py-6 text-center text-sm text-zinc-500">No entries in this filter.</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="bg-zinc-50 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-800">
-              <tr>
-                <th className="px-2 py-2">Request</th>
-                <th className="px-2 py-2">Requested by</th>
-                <th className="px-2 py-2 text-right">Amount</th>
-                <th className="px-2 py-2">Approved by</th>
-                <th className="px-2 py-2">Pay on</th>
-                <th className="px-2 py-2">Status</th>
-                <th className="px-2 py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {entries.map((e) => (
-                <tr key={e._id} className="text-zinc-700 dark:text-zinc-300">
-                  <td className="max-w-[120px] truncate px-2 py-2 font-medium">
-                    {requestLabel(e)}
-                    {e.businessName && (
-                      <span className="mt-0.5 block text-[10px] font-normal text-zinc-400">
-                        {e.businessName}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2">
-                    <span>{e.name}</span>
-                    {e.payee?.preferredMethod === "gpay" && e.payee.upiId && (
-                      <span className="mt-0.5 block text-[10px] text-[#1A5FD4]">GPay</span>
-                    )}
-                    {e.payee?.preferredMethod === "bank" && (
-                      <span className="mt-0.5 block text-[10px] text-[#0B4A8C]">Bank</span>
-                    )}
-                    {e.payee?.preferredMethod === "cash" && (
-                      <span className="mt-0.5 block text-[10px] text-amber-700">Cash</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums font-semibold">
+        <div className="space-y-2">
+          {entries.map((e) => {
+            const isPaid = e.paymentStatus === "paid";
+            const isExpanded = !isPaid || expandedId === e._id;
+            return (
+            <article
+              key={e._id}
+              className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              <button
+                type="button"
+                className="flex w-full items-start justify-between gap-3 text-left"
+                onClick={() => {
+                  if (!isPaid) return;
+                  setExpandedId((current) => (current === e._id ? null : e._id ?? null));
+                }}
+              >
+                <span className="flex min-w-0 items-start gap-2">
+                  {requestedBy && e.approvalStatus !== "pending" && e.paymentStatus !== "paid" ? (
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 accent-[#0B4A8C]"
+                      checked={selectedIds.includes(e._id ?? "")}
+                      onChange={() => e._id && toggleSelected(e._id)}
+                      onClick={(ev) => ev.stopPropagation()}
+                    />
+                  ) : null}
+                  <span className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      {e.category?.trim() || e.note?.trim() || e.name}
+                    </p>
+                    <p className="mt-0.5 text-xs text-zinc-500">
+                      {e.name}
+                      {e.payee?.preferredMethod === "cash" ? " · Cash" : ""}
+                      {e.payee?.preferredMethod === "gpay" && e.payee.upiId ? " · GPay" : ""}
+                      {e.payee?.preferredMethod === "bank" ? " · Bank" : ""}
+                    </p>
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="text-base font-bold tabular-nums text-[#0B4A8C]">
                     ₹{Math.abs(e.amount).toLocaleString("en-IN")}
-                  </td>
-                  <td className="px-2 py-2">{e.approvedBy || "—"}</td>
-                  <td className="px-2 py-2 tabular-nums">
-                    {e.paymentDueDate ? formatDateDDMMYYYY(e.paymentDueDate) : "—"}
-                  </td>
-                  <td className="px-2 py-2">
-                    {e.approvalStatus === "pending" ? (
-                      <span className="text-amber-700">⏳ User pending</span>
-                    ) : e.paymentStatus === "paid" ? (
-                      <span className="text-green-700">🟢 Paid</span>
-                    ) : (
-                      <span className="text-yellow-700">🟡 Payment pending</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2">
-                    <div className="flex flex-wrap items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(e)}
-                        className="rounded border border-zinc-200 px-2 py-1 text-[10px] font-medium text-zinc-700 hover:bg-zinc-50"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(e)}
-                        disabled={saving}
-                        className="rounded border border-red-200 px-2 py-1 text-[10px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        Delete
-                      </button>
-                      {e.approvalStatus === "pending" ? (
-                        <span className="text-[10px] text-zinc-500">User adds approver</span>
-                      ) : e.paymentStatus === "pending" ? (
-                        <button
-                          type="button"
-                          onClick={() => openVerify(e)}
-                          className="rounded-lg bg-[#0B4A8C] px-2 py-1 text-[10px] font-semibold text-white"
-                        >
-                          Pay
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                  {isPaid ? (
+                    <svg
+                      className={`h-4 w-4 text-zinc-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  ) : null}
+                </span>
+              </button>
+              {isPaid && !isExpanded ? (
+                <p className="mt-1 text-[11px] font-medium text-green-700">Paid · tap for details</p>
+              ) : (
+                <>
+              {isExpanded && isPaid ? (
+                <>
+                  {e.note?.trim() && e.note.trim() !== (e.category ?? "").trim() ? (
+                    <p className="mt-0.5 truncate text-[11px] text-zinc-400">{e.note.trim()}</p>
+                  ) : null}
+                  {e.businessName ? (
+                    <p className="text-[11px] text-zinc-400">{e.businessName}</p>
+                  ) : null}
+                </>
+              ) : !isPaid ? (
+                <>
+                  {e.note?.trim() && e.note.trim() !== (e.category ?? "").trim() ? (
+                    <p className="mt-0.5 truncate text-[11px] text-zinc-400">{e.note.trim()}</p>
+                  ) : null}
+                  {e.businessName ? (
+                    <p className="text-[11px] text-zinc-400">{e.businessName}</p>
+                  ) : null}
+                </>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+                <span>Approved: {e.approvedBy || "—"}</span>
+                <span>Pay on: {e.paymentDueDate ? formatDateDDMMYYYY(e.paymentDueDate) : "—"}</span>
+              </div>
+              <p className="mt-1 text-xs font-medium">
+                {e.approvalStatus === "pending" ? (
+                  <span className="text-amber-700">User pending</span>
+                ) : e.paymentStatus === "paid" ? (
+                  <span className="text-green-700">Paid</span>
+                ) : (
+                  <span className="text-yellow-700">Payment pending</span>
+                )}
+              </p>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => openEdit(e)}
+                  className="rounded-xl border border-zinc-200 py-2.5 text-xs font-semibold text-zinc-700"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(e)}
+                  disabled={saving}
+                  className="rounded-xl border border-red-200 py-2.5 text-xs font-semibold text-red-700 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+                {e.approvalStatus === "pending" ? (
+                  <span className="flex items-center justify-center text-center text-[10px] leading-tight text-zinc-500">
+                    User adds approver
+                  </span>
+                ) : e.paymentStatus === "pending" ? (
+                  <button
+                    type="button"
+                    onClick={() => openVerify(e)}
+                    className="rounded-xl bg-[#0B4A8C] py-2.5 text-xs font-bold text-white"
+                  >
+                    Pay
+                  </button>
+                ) : (
+                  <span className="flex items-center justify-center text-xs font-medium text-green-700">
+                    Done
+                  </span>
+                )}
+              </div>
+                </>
+              )}
+            </article>
+            );
+          })}
         </div>
       )}
 
@@ -425,7 +689,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
             onClick={() => setEditEntry(null)}
             aria-label="Close"
           />
-          <div className="fixed inset-x-4 top-8 z-[71] mx-auto max-h-[85vh] max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">
+          <div className="fixed inset-x-0 bottom-0 z-[71] max-h-[88dvh] overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:inset-x-4 sm:bottom-auto sm:top-8 sm:mx-auto sm:max-h-[85vh] sm:max-w-md sm:rounded-2xl">
             <h3 className="text-base font-bold text-zinc-900">Edit expense</h3>
             <p className="mt-1 text-xs text-zinc-500">
               Account: {editEntry.businessName || editEntry.businessId}
@@ -522,7 +786,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
             onClick={() => setVerifyEntry(null)}
             aria-label="Close"
           />
-          <div className="fixed inset-x-4 top-8 z-[71] mx-auto max-h-[85vh] max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">
+          <div className="fixed inset-x-0 bottom-0 z-[71] max-h-[88dvh] overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:inset-x-4 sm:bottom-auto sm:top-8 sm:mx-auto sm:max-h-[85vh] sm:max-w-md sm:rounded-2xl">
             <h3 className="text-base font-bold text-zinc-900">Transfer &amp; Verify</h3>
             <div className="mt-2 space-y-1 rounded-lg bg-[#F4F8FC] p-3 text-sm text-[#0B4A8C]">
               <p className="font-semibold">{requestLabel(verifyEntry)}</p>
@@ -544,21 +808,41 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                 </p>
 
                 {upiUrl && (
-                  <a
-                    href={upiUrl}
-                    onClick={() => setPaymentMethod("GPay / UPI")}
-                    className="flex items-center gap-3 rounded-xl border border-[#4285F4] bg-[#E8F1FE] px-3 py-3 text-sm font-semibold text-[#1A5FD4] active:scale-[0.99]"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-lg">
-                      G
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block">Pay with GPay / UPI</span>
-                      <span className="block truncate text-xs font-normal text-[#5A7FA5]">
-                        {payee.upiId} · ₹{verifyAmount.toLocaleString("en-IN")}
+                  <>
+                    <a
+                      href={upiUrl}
+                      onClick={() => choosePaymentMethod("GPay / UPI")}
+                      className="flex items-center gap-3 rounded-xl border border-[#4285F4] bg-[#E8F1FE] px-3 py-3 text-sm font-semibold text-[#1A5FD4] active:scale-[0.99]"
+                    >
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-lg">
+                        G
                       </span>
-                    </span>
-                  </a>
+                      <span className="min-w-0 flex-1">
+                        <span className="block">Pay with GPay / UPI</span>
+                        <span className="block truncate text-xs font-normal text-[#5A7FA5]">
+                          {payee.upiId} · ₹{verifyAmount.toLocaleString("en-IN")}
+                        </span>
+                      </span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        choosePaymentMethod("GPay / UPI");
+                        void copyText(
+                          `${payee.upiId}  ₹${verifyAmount.toFixed(2)}`,
+                          "UPI ID and amount"
+                        );
+                      }}
+                      className="w-full rounded-lg border border-[#D6E6F5] px-3 py-2 text-left text-xs font-medium text-[#0B4A8C]"
+                    >
+                      Copy UPI ID &amp; amount — pay from GPay chat if intent fails
+                    </button>
+                    <p className="text-[11px] leading-snug text-[#5A7FA5]">
+                      If GPay shows a bank limit error, pay that person inside GPay chat, then type a
+                      short note below (example: Paid GPay). GPay does not let you copy a transaction
+                      ID. Returning from GPay does not mark this as paid.
+                    </p>
+                  </>
                 )}
 
                 {bankDetails && (
@@ -624,7 +908,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                   <button
                     key={m}
                     type="button"
-                    onClick={() => setPaymentMethod(m)}
+                    onClick={() => choosePaymentMethod(m)}
                     className={`flex-1 rounded-lg border py-2 text-xs font-medium ${
                       paymentMethod === m
                         ? "border-[#0B4A8C] bg-[#EEF5FC] text-[#0B4A8C]"
@@ -655,21 +939,30 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                 <input
                   value={paymentReference}
                   onChange={(ev) => setPaymentReference(ev.target.value)}
-                  placeholder="UTR123456789"
+                  placeholder="12-digit UTR from bank receipt"
+                  autoComplete="off"
+                  spellCheck={false}
                   className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
                 />
+                {paymentReference.trim() && !upiReferenceCheck.ok && (
+                  <p className="mt-1 text-[11px] text-red-600">{upiReferenceCheck.error}</p>
+                )}
               </div>
             ) : paymentMethod === "GPay / UPI" ? (
               <div className="mt-3">
                 <label className="mb-1 block text-xs font-medium text-zinc-600">
-                  UPI transaction ID *
+                  GPay note *
                 </label>
                 <input
                   value={paymentReference}
                   onChange={(ev) => setPaymentReference(ev.target.value)}
-                  placeholder="After GPay payment"
+                  placeholder="Paid GPay"
+                  autoComplete="off"
                   className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
                 />
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  GPay has no copy ID. Type any short note, like Paid GPay.
+                </p>
               </div>
             ) : (
               <div className="mt-3">
@@ -697,11 +990,137 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
             <button
               type="button"
-              disabled={saving}
+              disabled={
+                saving ||
+                ((paymentMethod === "GPay / UPI" || paymentMethod === "Bank Transfer") &&
+                  !upiReferenceCheck.ok)
+              }
               onClick={handleVerify}
               className="mt-4 w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white disabled:opacity-60"
             >
               {saving ? "Saving…" : "Mark as Paid & Verify"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {showBulk && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[70] bg-black/50"
+            onClick={() => setShowBulk(false)}
+            aria-label="Close"
+          />
+          <div className="fixed inset-x-0 bottom-0 z-[71] max-h-[88dvh] overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:inset-x-4 sm:bottom-auto sm:top-8 sm:mx-auto sm:max-h-[85vh] sm:max-w-md sm:rounded-2xl">
+            <h3 className="text-base font-bold text-zinc-900">Bulk mark as paid</h3>
+            <div className="mt-2 rounded-lg bg-[#F4F8FC] p-3 text-sm text-[#0B4A8C]">
+              <p className="font-semibold">{requestedBy || "Selected entries"}</p>
+              <p>
+                {selectedIds.length} pending · ₹{selectedPendingAmount.toLocaleString("en-IN")}
+              </p>
+              {(fromDate || toDate) && (
+                <p className="text-xs">
+                  {fromDate || "…"} to {toDate || "…"}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3">
+              <p className="mb-2 text-xs font-semibold uppercase text-zinc-500">Payment method</p>
+              <div className="flex gap-2">
+                {PAYMENT_METHODS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => choosePaymentMethod(m)}
+                    className={`flex-1 rounded-lg border py-2 text-xs font-medium ${
+                      paymentMethod === m
+                        ? "border-[#0B4A8C] bg-[#EEF5FC] text-[#0B4A8C]"
+                        : "border-zinc-200 text-zinc-600"
+                    }`}
+                  >
+                    {m === "GPay / UPI" ? "GPay" : m === "Bank Transfer" ? "Bank" : "Cash"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-zinc-600">Payment date *</label>
+              <input
+                type="date"
+                value={paymentDate}
+                onChange={(ev) => setPaymentDate(ev.target.value)}
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              />
+            </div>
+
+            {paymentMethod === "Cash" ? (
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-medium text-zinc-600">Paid to *</label>
+                <input
+                  value={paymentPaidTo}
+                  onChange={(ev) => setPaymentPaidTo(ev.target.value)}
+                  placeholder={requestedBy || "Name"}
+                  className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                />
+              </div>
+            ) : (
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-medium text-zinc-600">
+                  {paymentMethod === "GPay / UPI" ? "GPay note *" : "UTR / Bank reference *"}
+                </label>
+                <input
+                  value={paymentReference}
+                  onChange={(ev) => setPaymentReference(ev.target.value)}
+                  placeholder={
+                    paymentMethod === "GPay / UPI"
+                      ? DEFAULT_GPAY_NOTE
+                      : "One UTR for this bulk pay"
+                  }
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                />
+                {paymentMethod === "GPay / UPI" ? (
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    GPay has no copy ID. Type a short note such as Paid GPay.
+                  </p>
+                ) : null}
+                {paymentMethod === "Bank Transfer" &&
+                paymentReference.trim() &&
+                !upiReferenceCheck.ok ? (
+                  <p className="mt-1 text-[11px] text-red-600">{upiReferenceCheck.error}</p>
+                ) : null}
+              </div>
+            )}
+
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-zinc-600">Note (optional)</label>
+              <input
+                value={paymentNote}
+                onChange={(ev) => setPaymentNote(ev.target.value)}
+                placeholder="e.g. Paid Murugan weekly wages"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              />
+            </div>
+
+            {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+
+            <button
+              type="button"
+              disabled={
+                saving ||
+                selectedIds.length === 0 ||
+                ((paymentMethod === "GPay / UPI" || paymentMethod === "Bank Transfer") &&
+                  !upiReferenceCheck.ok)
+              }
+              onClick={handleBulkPay}
+              className="mt-4 w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white disabled:opacity-60"
+            >
+              {saving
+                ? "Saving…"
+                : `Mark ${selectedIds.length} as paid · ₹${selectedPendingAmount.toLocaleString("en-IN")}`}
             </button>
           </div>
         </>

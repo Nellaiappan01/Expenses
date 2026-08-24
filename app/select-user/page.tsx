@@ -65,6 +65,43 @@ function CopyButton({
   );
 }
 
+function passwordPickerAvailable(): boolean {
+  return typeof window !== "undefined" && "PasswordCredential" in window && Boolean(navigator.credentials?.get);
+}
+
+function isPasswordCredential(cred: Credential | null): cred is PasswordCredential {
+  return Boolean(cred && cred.type === "password" && "password" in cred);
+}
+
+/** Opens Google Password Manager / browser saved-login picker (the account list sheet). */
+async function requestSavedPassword(
+  mediation: CredentialMediationRequirement = "required"
+): Promise<PasswordCredential | null> {
+  if (!passwordPickerAvailable()) return null;
+  try {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    const cred = await navigator.credentials.get({
+      password: true,
+      mediation,
+    });
+    return isPasswordCredential(cred) ? cred : null;
+  } catch {
+    return null;
+  }
+}
+
+async function storeSavedPassword(id: string, password: string, name?: string) {
+  if (typeof window === "undefined" || !("PasswordCredential" in window)) return;
+  try {
+    const cred = new PasswordCredential({ id, password, name: name || id });
+    await navigator.credentials.store(cred);
+  } catch {
+    // Browser may ignore if the user declined saving
+  }
+}
+
 async function parseJsonResponse(res: Response): Promise<AuthJson> {
   const text = await res.text();
   try {
@@ -101,6 +138,60 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [pickingAccount, setPickingAccount] = useState(false);
+  const [pickerAvailable, setPickerAvailable] = useState(false);
+  const credInFlight = useRef(false);
+  const skipPickerOnFieldTap = useRef(false);
+
+  useEffect(() => {
+    setPickerAvailable(passwordPickerAvailable());
+  }, []);
+
+  const applySavedCredential = useCallback((cred: PasswordCredential) => {
+    setUsername(cred.id);
+    setPassword(cred.password ?? "");
+    setShowPassword(false);
+  }, []);
+
+  const pickSavedAccount = useCallback(
+    async (fromUserGesture: boolean) => {
+      if (mode !== "login" || credInFlight.current) return;
+      credInFlight.current = true;
+      setPickingAccount(true);
+      try {
+        const cred = await requestSavedPassword("required");
+        if (cred?.password) {
+          applySavedCredential(cred);
+          skipPickerOnFieldTap.current = true;
+        } else if (fromUserGesture) {
+          skipPickerOnFieldTap.current = true;
+        }
+      } finally {
+        credInFlight.current = false;
+        setPickingAccount(false);
+      }
+    },
+    [mode, applySavedCredential]
+  );
+
+  useEffect(() => {
+    if (mode !== "login" || !pickerAvailable) {
+      skipPickerOnFieldTap.current = false;
+      return;
+    }
+    skipPickerOnFieldTap.current = false;
+    const timer = window.setTimeout(() => {
+      void pickSavedAccount(false);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [mode, pickerAvailable, pickSavedAccount]);
+
+  function onLoginFieldPointerDown(e: React.PointerEvent<HTMLInputElement>) {
+    if (!pickerAvailable) return;
+    if (mode !== "login" || skipPickerOnFieldTap.current || credInFlight.current) return;
+    e.preventDefault();
+    void pickSavedAccount(true);
+  }
 
   const loadAppsScript = useCallback(async () => {
     try {
@@ -141,6 +232,11 @@ export default function LoginPage() {
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Login failed");
       if (!data.token || !data.userId) throw new Error("Invalid server response");
+      await storeSavedPassword(
+        username.trim(),
+        password,
+        data.name ?? data.username ?? username.trim()
+      );
       setUser({
         token: data.token,
         userId: data.userId,
@@ -148,7 +244,7 @@ export default function LoginPage() {
         username: data.username ?? username.trim().toLowerCase(),
         isAdmin: data.isAdmin,
       });
-      router.push("/");
+      router.push(data.isAdmin ? "/admin/payments" : "/");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -185,7 +281,7 @@ export default function LoginPage() {
         username: data.username ?? username.trim().toLowerCase(),
         isAdmin: data.isAdmin,
       });
-      router.push("/");
+      router.push(data.isAdmin ? "/admin/payments" : "/");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -244,19 +340,43 @@ export default function LoginPage() {
           </div>
 
           <form
+            id={mode === "login" ? "login" : "register"}
+            name={mode === "login" ? "login" : "register"}
+            method="post"
+            action={mode === "login" ? "/api/auth/login" : "/api/auth/register"}
+            autoComplete={mode === "login" ? "on" : "off"}
             onSubmit={mode === "login" ? handleLogin : handleRegister}
             className="space-y-4 p-4 pt-5"
           >
+            {mode === "login" && pickerAvailable ? (
+              <button
+                type="button"
+                onClick={() => {
+                  skipPickerOnFieldTap.current = false;
+                  void pickSavedAccount(true);
+                }}
+                disabled={pickingAccount}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#4285F4]/40 bg-[#E8F1FE] px-3 py-3 text-sm font-semibold text-[#1A5FD4] disabled:opacity-70"
+              >
+                {pickingAccount ? "Opening saved accounts…" : "Use saved account"}
+              </button>
+            ) : null}
+
             <div>
               <FieldLabel>Email / Username</FieldLabel>
               <input
+                id="login-username"
+                name="username"
                 type="text"
-                inputMode="email"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                onPointerDown={onLoginFieldPointerDown}
                 placeholder="you@business.com"
                 required
                 autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 className={fieldClass()}
               />
             </div>
@@ -392,9 +512,12 @@ export default function LoginPage() {
               <FieldLabel>Password</FieldLabel>
               <div className="relative">
                 <input
+                  id="login-password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onPointerDown={onLoginFieldPointerDown}
                   placeholder={mode === "register" ? "Min 6 characters" : "Your password"}
                   required
                   minLength={mode === "register" ? 6 : 1}

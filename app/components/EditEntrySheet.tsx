@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
+import { toDateInputValue } from "@/lib/dateFormat";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
 import type { Entry, PaymentMethod } from "@/lib/types";
 import SearchableDropdown from "./ui/SearchableDropdown";
@@ -19,19 +20,6 @@ export function TrashIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  );
-}
-
-export function LockIcon({ className = "h-5 w-5" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-      />
     </svg>
   );
 }
@@ -79,7 +67,7 @@ export default function EditEntrySheet({
     setAmount(String(Math.abs(entry.amount)));
     setMethod(entry.method);
     setBankName(entry.bankName || "");
-    setDate(entry.date);
+    setDate(toDateInputValue(entry.date));
     setCategory(entry.category || "");
     setApprovedBy(entry.approvedBy || "");
     setNote(entry.note || "");
@@ -106,7 +94,7 @@ export default function EditEntrySheet({
       if (name.trim() !== entry.name) payload.name = name.trim();
       if (normalizedAmount !== entry.amount) payload.amount = normalizedAmount;
       if (method !== entry.method) payload.method = method;
-      if (date !== entry.date) payload.date = date;
+      if (date && date !== toDateInputValue(entry.date)) payload.date = date;
       if ((category.trim() || "") !== (entry.category ?? "")) payload.category = category.trim();
       if ((note.trim() || "") !== (entry.note ?? "")) payload.note = note.trim();
       if (showApprovedBy && approvedBy.trim() !== (entry.approvedBy ?? "")) {

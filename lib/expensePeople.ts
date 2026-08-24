@@ -59,11 +59,36 @@ export function findExpensePerson(
   return people.find((p) => p.nameLower === key);
 }
 
-export function buildUpiPayUrl(params: { upiId: string; name: string; amount: number }): string {
-  const pa = encodeURIComponent(params.upiId.trim());
-  const pn = encodeURIComponent(params.name.trim());
+/** Personal VPA charset used by NPCI (do not percent-encode `@`). */
+const PERSONAL_VPA = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9._-]{2,64}$/;
+
+export function isValidUpiId(upiId: string): boolean {
+  return PERSONAL_VPA.test(upiId.trim());
+}
+
+/**
+ * P2P UPI deep link (not a merchant checkout).
+ *
+ * Intentionally omits `mc` (merchant code) and `tr` (merchant order id). Those
+ * mark the payment as P2M. GPay/NPCI reject or mis-limit intent payments to
+ * personal VPAs; faking merchant fields does not make a personal @oksbi ID a
+ * registered merchant.
+ *
+ * `pa` is left unencoded so GPay receives `name@bank` rather than `name%40bank`.
+ */
+export function buildUpiPayUrl(params: {
+  upiId: string;
+  name: string;
+  amount: number;
+  note?: string;
+}): string | null {
+  const pa = params.upiId.trim();
+  if (!isValidUpiId(pa)) return null;
+  const pn = encodeURIComponent(params.name.trim() || "Payee");
   const am = Math.abs(params.amount).toFixed(2);
-  return `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR`;
+  const note = params.note?.trim().replace(/\s+/g, " ").slice(0, 50);
+  const tn = note ? `&tn=${encodeURIComponent(note)}` : "";
+  return `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR${tn}`;
 }
 
 export function formatBankDetailsText(person: ExpensePerson): string {

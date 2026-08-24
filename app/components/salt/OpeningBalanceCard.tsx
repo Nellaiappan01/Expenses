@@ -72,17 +72,17 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
   }, [userId]);
 
   useEffect(() => {
-    if (!userId) return;
-    const cached = readBalanceCache(userId);
-    if (cached !== null) {
-      setSummary((prev) => ({
-        net: cached,
-        pendingApproval: prev?.pendingApproval ?? 0,
-        paymentPending: prev?.paymentPending ?? 0,
-        totalUnpaid: prev?.totalUnpaid ?? 0,
-      }));
-      setUpdatedAt(formatLastUpdated());
+    if (!userId) {
+      setSummary(null);
+      return;
     }
+    const cached = readBalanceCache(userId);
+    setSummary(
+      cached !== null
+        ? { net: cached, pendingApproval: 0, paymentPending: 0, totalUnpaid: 0 }
+        : null
+    );
+    if (cached !== null) setUpdatedAt(formatLastUpdated());
     fetchBalance();
   }, [userId, fetchBalance, refreshTrigger]);
 

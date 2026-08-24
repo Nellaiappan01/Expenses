@@ -7,11 +7,14 @@ export default function MainWithPadding({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const hasHeader = pathname !== "/select-user" && !isPublicRoute(pathname);
   const isSaltHome = pathname === "/";
+  const isAdminArea = pathname.startsWith("/admin");
 
   return (
     <main
       className={
-        hasHeader && !isSaltHome ? "pt-[calc(4rem+env(safe-area-inset-top))]" : ""
+        hasHeader && !isSaltHome && !isAdminArea
+          ? "pt-[calc(4rem+env(safe-area-inset-top))]"
+          : ""
       }
     >
       {children}

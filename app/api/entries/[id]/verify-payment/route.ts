@@ -13,6 +13,7 @@ import {
 } from "@/lib/googleSheetsSync";
 import { getDb } from "@/lib/mongodb";
 import { getSheetsWebhookUrl } from "@/lib/userSettings";
+import { validatePaymentReference } from "@/lib/paymentReference";
 import type { PaymentVerifiedMethod } from "@/lib/types";
 
 export async function POST(
@@ -34,7 +35,6 @@ export async function POST(
     const body = await request.json();
     const paymentVerifiedMethod = body.paymentMethod as PaymentVerifiedMethod;
     const paymentDate = body.paymentDate?.trim();
-    const paymentReference = body.paymentReference?.trim() || "";
     const paymentPaidTo = body.paymentPaidTo?.trim() || "";
     const paymentNote = body.paymentNote?.trim() || "";
 
@@ -48,12 +48,15 @@ export async function POST(
     if (!paymentDate) {
       return NextResponse.json({ error: "Payment date is required" }, { status: 400 });
     }
-    if (paymentVerifiedMethod === "Bank Transfer" && !paymentReference) {
-      return NextResponse.json({ error: "UTR / bank reference is required" }, { status: 400 });
+
+    const referenceCheck = validatePaymentReference(
+      paymentVerifiedMethod,
+      typeof body.paymentReference === "string" ? body.paymentReference : ""
+    );
+    if (!referenceCheck.ok) {
+      return NextResponse.json({ error: referenceCheck.error }, { status: 400 });
     }
-    if (paymentVerifiedMethod === "GPay / UPI" && !paymentReference) {
-      return NextResponse.json({ error: "UPI transaction reference is required" }, { status: 400 });
-    }
+    const paymentReference = referenceCheck.value;
     if (paymentVerifiedMethod === "Cash" && !paymentPaidTo) {
       return NextResponse.json({ error: "Paid to is required for cash" }, { status: 400 });
     }

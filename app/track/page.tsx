@@ -14,15 +14,15 @@ import {
   type TrackSummaryStats,
 } from "@/lib/trackWhatsAppSummary";
 import { useConfig } from "../context/ConfigContext";
+import { useUser } from "../context/UserContext";
 import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 import type { Entry } from "@/lib/types";
-import { canUserModifyEntry } from "@/lib/paymentWorkflow";
-import EditEntrySheet, { EditIcon, LockIcon, TrashIcon } from "../components/EditEntrySheet";
+import { canUserModifyEntry, entryLockShortLabel } from "@/lib/paymentWorkflow";
+import EditEntrySheet, { EditIcon, TrashIcon } from "../components/EditEntrySheet";
 import ApproveOnSiteSheet from "../components/payments/ApproveOnSiteSheet";
 import { PaymentStatusBadge, PaymentStatusDetail } from "../components/payments/PaymentStatus";
 import SyncStatusBadge, { resolveSyncStatus } from "../components/SyncStatusBadge";
 import SheetsSyncBanner from "../components/SheetsSyncBanner";
-import { useUser } from "../context/UserContext";
 
 function formatDate(isoDate: string) {
   return formatDateDDMMYYYY(isoDate);
@@ -99,7 +99,7 @@ function toSummaryFilters(activeFilters: Filters): TrackSummaryFilters {
 export default function TrackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { userName } = useUser();
+  const { userName, userId } = useUser();
   const { config } = useConfig() ?? {};
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,7 +156,11 @@ export default function TrackPage() {
       const summaryUrl = `/api/track/summary?${summaryParams}`;
 
       const hasCache = readClientCache(cacheKey(entriesUrl)) !== null;
-      if (!hasCache) setLoading(true);
+      if (!hasCache) {
+        setEntries([]);
+        setSummaryStats(null);
+        setLoading(true);
+      }
 
       try {
         const [entriesResult, summaryResult] = await Promise.all([
@@ -201,8 +205,10 @@ export default function TrackPage() {
     if (urlFrom || urlTo || urlWorkflow || urlSheetsSync) {
       setShowFilters(true);
     }
+    setEntries([]);
+    setSummaryStats(null);
     fetchEntries(1, next);
-  }, [urlFrom, urlTo, urlWorkflow, urlSheetsSync, fetchEntries]);
+  }, [urlFrom, urlTo, urlWorkflow, urlSheetsSync, fetchEntries, userId]);
 
   useEffect(() => {
     const features = config?.features ?? { expenses: false, workers: false, stock: false };
@@ -490,18 +496,9 @@ export default function TrackPage() {
           {summaryStats && total > 0 && (
             <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 -mx-4 mb-4 bg-[var(--background)]/95 px-4 py-2 backdrop-blur-md">
               <div className="ui-card overflow-hidden p-0 shadow-md ring-1 ring-[var(--border-soft)]">
-                <div className="bg-gradient-to-br from-[#0B4A8C] to-[#062f5c] px-4 py-3.5 text-white">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-white/65">
-                    Payment overview
-                  </p>
-                  <p className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight">
-                    {formatSummaryCurrency(summaryStats.totalAmount)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-white/55">
-                    {summaryStats.totalEntries} entr{summaryStats.totalEntries === 1 ? "y" : "ies"}{" "}
-                    in results
-                  </p>
-                </div>
+                <p className="border-b border-slate-100 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#5A7FA5]">
+                  Payment overview
+                </p>
                 <div className="grid grid-cols-3 divide-x divide-slate-100 bg-white">
                   <TrackSummaryStat
                     label="Pending approval"
@@ -613,8 +610,8 @@ export default function TrackPage() {
                             {formatAmount(entry.amount)}
                           </p>
                           {!canModify && (
-                            <span className="text-amber-700" aria-label="Entry locked" title="Locked">
-                              <LockIcon className="h-4 w-4" />
+                            <span className="max-w-[7.5rem] text-right text-[10px] font-semibold leading-tight text-amber-800">
+                              {entryLockShortLabel(entry)}
                             </span>
                           )}
                           <svg

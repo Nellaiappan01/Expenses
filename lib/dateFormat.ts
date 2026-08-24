@@ -1,3 +1,13 @@
+/** YYYY-MM-DD for `<input type="date">` (avoids UTC shift from toISOString). */
+export function toDateInputValue(date: Date | string): string {
+  if (typeof date === "string") {
+    const trimmed = date.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  }
+  const d = parseLocalDate(date);
+  return d ? toLocalDateString(d) : "";
+}
+
 /** YYYY-MM-DD in local timezone (avoid UTC shift from toISOString) */
 export function toLocalDateString(d: Date = new Date()): string {
   const y = d.getFullYear();

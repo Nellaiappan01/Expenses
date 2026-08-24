@@ -61,6 +61,23 @@ export async function ensureExpenseCategory(db: Db, businessId: string, category
   );
 }
 
+export async function ensureExpenseNote(db: Db, businessId: string, note: string) {
+  const trimmed = note.trim();
+  if (!trimmed) return;
+  const key = trimmed.toLowerCase();
+  const doc = await db.collection("defaults").findOne({ businessId });
+  const existing = (doc?.notes as string[] | undefined) ?? [];
+  if (existing.some((n) => n.trim().toLowerCase() === key)) return;
+  await db.collection("defaults").updateOne(
+    { businessId },
+    {
+      $set: { businessId },
+      $addToSet: { notes: trimmed },
+    },
+    { upsert: true }
+  );
+}
+
 export async function ensureExpenseTag(db: Db, businessId: string, tag: string) {
   const trimmed = tag.trim();
   if (!trimmed) return;

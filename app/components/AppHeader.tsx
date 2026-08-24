@@ -157,6 +157,8 @@ export default function AppHeader() {
 
   if (pathname === "/") return null;
 
+  if (pathname.startsWith("/admin")) return null;
+
   const isActive = (href: string) =>
     pathname === href || (href !== "/" && pathname.startsWith(href));
 

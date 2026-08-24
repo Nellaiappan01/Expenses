@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { amountInWords } from "@/lib/amountInWords";
 import { isNetworkFailure, queueOfflineEntry } from "@/lib/offlineEntryQueue";
@@ -38,6 +39,8 @@ export default function ExpenseEntryForm({
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [requestedByOptions, setRequestedByOptions] = useState<string[]>([]);
   const [approvedByOptions, setApprovedByOptions] = useState<string[]>([]);
+  const [noteOptions, setNoteOptions] = useState<string[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -61,6 +64,7 @@ export default function ExpenseEntryForm({
     setCategoryOptions(defaults.expenseCategories ?? []);
     setRequestedByOptions(defaults.expenseNames ?? []);
     setApprovedByOptions(defaults.approverNames ?? []);
+    setNoteOptions(defaults.notes ?? []);
   }, []);
 
   useEffect(() => {
@@ -74,10 +78,10 @@ export default function ExpenseEntryForm({
     const onVisible = () => {
       if (document.visibilityState === "visible") loadDefaults();
     };
-    window.addEventListener("defaults-updated", onDefaultsUpdated);
+    window.addEventListener("ledger-defaults-updated", onDefaultsUpdated);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      window.removeEventListener("defaults-updated", onDefaultsUpdated);
+      window.removeEventListener("ledger-defaults-updated", onDefaultsUpdated);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [loadDefaults]);
@@ -86,6 +90,7 @@ export default function ExpenseEntryForm({
     setCategory("");
     setAmount("");
     setNote("");
+    setNotesOpen(false);
     setRequestedBy("");
     setApprovedBy("");
     setPaymentDueDate(todayISO());
@@ -213,12 +218,6 @@ export default function ExpenseEntryForm({
 
   return (
     <form onSubmit={handleSubmit} className="form-enter ui-card p-4 sm:p-5">
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <div>
-          <h2 className="ui-section-title">New expense</h2>
-          <p className="mt-0.5 text-xs text-[var(--text-faint)]">Record a site expense</p>
-        </div>
-      </div>
       <div className="space-y-3.5">
         <div className="grid grid-cols-2 gap-2.5">
           <div className="min-w-0">
@@ -292,15 +291,99 @@ export default function ExpenseEntryForm({
           )}
         </div>
 
-        <textarea
-          ref={noteRef}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Expenses notes (optional)"
-          aria-label="Expenses notes"
-          rows={2}
-          className={`${fieldClass()} resize-none`}
-        />
+        <div className="relative">
+          <textarea
+            ref={noteRef}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Expenses notes (optional)"
+            aria-label="Expenses notes"
+            rows={2}
+            className={`${fieldClass()} resize-none ${noteOptions.length > 0 ? "pr-11" : ""}`}
+          />
+          {noteOptions.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setNotesOpen(true)}
+              className="absolute right-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-[#0B4A8C] hover:bg-[#E8F2FA]"
+              aria-label="Choose a saved note"
+              aria-haspopup="dialog"
+              aria-expanded={notesOpen}
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.75}
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+        {notesOpen && typeof document !== "undefined"
+          ? createPortal(
+              <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-4">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/40"
+                  aria-label="Close saved notes"
+                  onClick={() => setNotesOpen(false)}
+                />
+                <div
+                  role="dialog"
+                  aria-label="Saved expense notes"
+                  className="relative z-10 flex max-h-[75dvh] w-full max-w-md flex-col rounded-t-3xl bg-white shadow-xl sm:rounded-2xl"
+                >
+                  <div className="flex items-center justify-between border-b border-[#E8F0F7] px-4 py-3">
+                    <p className="text-sm font-bold text-[#0B4A8C]">Saved notes</p>
+                    <button
+                      type="button"
+                      onClick={() => setNotesOpen(false)}
+                      className="rounded-lg px-3 py-1.5 text-xs font-bold text-[#0B4A8C]"
+                    >
+                      Done
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+                    {note.trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNote("");
+                          setNotesOpen(false);
+                        }}
+                        className="mb-1 w-full rounded-xl px-3 py-3 text-left text-sm text-zinc-500"
+                      >
+                        Clear note
+                      </button>
+                    ) : null}
+                    {noteOptions.map((item) => {
+                      const selected = note.trim().toLowerCase() === item.trim().toLowerCase();
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => {
+                            setNote(item);
+                            setNotesOpen(false);
+                          }}
+                          className={`mb-1 w-full rounded-xl px-3 py-3 text-left text-sm font-medium ${
+                            selected
+                              ? "bg-[#0B4A8C] text-white"
+                              : "text-[#0B4A8C] active:bg-[#F4F8FC]"
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )
+          : null}
 
         <div className="min-w-0 space-y-3">
           <SearchableDropdown
