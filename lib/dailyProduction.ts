@@ -101,6 +101,11 @@ export async function upsertDailyProduction(
   const now = new Date();
   const filter = { businessId, date };
   const trimmedCategory = category?.trim() || "";
+  const unset: { sheetsSyncLeaseUntil: ""; category?: "" } = {
+    sheetsSyncLeaseUntil: "",
+  };
+  if (!trimmedCategory) unset.category = "";
+
   const update = {
     $set: {
       tonnes,
@@ -109,10 +114,7 @@ export async function upsertDailyProduction(
       sheetsSyncError: null,
       ...(trimmedCategory ? { category: trimmedCategory } : {}),
     },
-    $unset: {
-      sheetsSyncLeaseUntil: "",
-      ...(trimmedCategory ? {} : { category: "" }),
-    },
+    $unset: unset,
     $setOnInsert: {
       businessId,
       date,

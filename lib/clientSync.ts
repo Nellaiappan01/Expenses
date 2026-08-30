@@ -9,7 +9,7 @@ export type SyncAllResult = {
   sheetsSucceeded: number;
   sheetsFailed: number;
   message: string;
-  counts?: { pending: number; failed: number; total: number };
+  counts?: { pending: number; failed: number; total: number; removing?: number };
 };
 
 let syncInFlight: Promise<SyncAllResult> | null = null;
@@ -23,7 +23,7 @@ export async function syncEverything(): Promise<SyncAllResult> {
 
     let sheetsSucceeded = 0;
     let sheetsFailed = 0;
-    let counts = { pending: 0, failed: 0, total: 0 };
+    let counts = { pending: 0, failed: 0, total: 0, removing: 0 };
     let hasMore = true;
     let batches = 0;
     const maxBatches = 8;
@@ -44,7 +44,12 @@ export async function syncEverything(): Promise<SyncAllResult> {
         const batchSucceeded = data.succeeded ?? 0;
         sheetsSucceeded += batchSucceeded;
         sheetsFailed += data.failed ?? 0;
-        counts = data.counts ?? counts;
+        counts = {
+          pending: data.counts?.pending ?? counts.pending,
+          failed: data.counts?.failed ?? counts.failed,
+          total: data.counts?.total ?? counts.total,
+          removing: data.counts?.removing ?? counts.removing,
+        };
         hasMore = Boolean(data.hasMore);
 
         if (!hasMore) break;
