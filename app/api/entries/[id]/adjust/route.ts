@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { invalidateBalanceCache } from "@/lib/balance";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
-import { scheduleSheetsAdjustment } from "@/lib/googleSheetsSync";
+import { scheduleSheetsAdjustment, syncEntryAdjustment } from "@/lib/googleSheetsSync";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import { canUserModifyEntry, entryModifyLockReason } from "@/lib/paymentWorkflow";
@@ -298,21 +298,23 @@ export async function DELETE(
 
     invalidateBalanceCache(userId);
 
-    scheduleSheetsAdjustment(
+    const sheetsResult = await syncEntryAdjustment(
       db,
       userId,
       id,
       "delete",
       existing as Record<string, unknown>,
-      existing as Record<string, unknown>
+      existing as Record<string, unknown>,
+      reason
     );
 
     return NextResponse.json({
       ...result,
       _id: result._id?.toString(),
       createdAt: result.createdAt?.toISOString?.(),
-      sheetsSyncStatus: "pending",
-      sheetsSyncError: null,
+      sheetsSyncStatus: sheetsResult.status,
+      sheetsSyncError: sheetsResult.error ?? null,
+      sheetsDeleted: sheetsResult.ok,
     });
   } catch (error) {
     console.error("Error deleting entry:", error);

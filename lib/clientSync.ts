@@ -1,5 +1,6 @@
 import { apiFetch, readApiJson } from "./api";
 import { flushOfflineQueue } from "./offlineEntryQueue";
+import { sheetsEtaLabel } from "./sheetsSyncCopy";
 
 export type SyncAllResult = {
   ok: boolean;
@@ -11,57 +12,71 @@ export type SyncAllResult = {
   counts?: { pending: number; failed: number; total: number };
 };
 
-/** One tap: upload offline entries + retry all Google Sheets sync. */
-export async function syncEverything(): Promise<SyncAllResult> {
-  const offline = await flushOfflineQueue();
+let syncInFlight: Promise<SyncAllResult> | null = null;
 
-  let sheetsSucceeded = 0;
-  let sheetsFailed = 0;
-  let counts = { pending: 0, failed: 0, total: 0 };
+/** One tap: upload offline entries + retry Google Sheets sync (batched, no double-run). */
+export async function syncEverything(): Promise<SyncAllResult> {
+  if (syncInFlight) return syncInFlight;
+
+  syncInFlight = (async () => {
+    const offline = await flushOfflineQueue();
+
+    let sheetsSucceeded = 0;
+    let sheetsFailed = 0;
+    let counts = { pending: 0, failed: 0, total: 0 };
+    let hasMore = true;
+    let batches = 0;
+    const maxBatches = 8;
+
+    try {
+      while (hasMore && batches < maxBatches) {
+        batches += 1;
+        const res = await apiFetch("/api/sheets/sync-all", { method: "POST" });
+        const data = await readApiJson<{
+          succeeded?: number;
+          failed?: number;
+          hasMore?: boolean;
+          counts?: { pending: number; failed: number; total: number; removing?: number };
+        }>(res);
+
+        if (!res.ok) break;
+
+        const batchSucceeded = data.succeeded ?? 0;
+        sheetsSucceeded += batchSucceeded;
+        sheetsFailed += data.failed ?? 0;
+        counts = data.counts ?? counts;
+        hasMore = Boolean(data.hasMore);
+
+        if (!hasMore) break;
+        // Same failed rows will not succeed by hammering the sheet.
+        if (batchSucceeded === 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    } catch {
+      /* server unreachable — offline flush may still have worked */
+    }
+
+    const ok = offline.failed === 0 && counts.total === 0;
+    const message = ok
+      ? "Sheet is up to date."
+      : `${counts.pending} waiting · ${counts.failed} failed · ${sheetsEtaLabel(counts.total)}`;
+
+    window.dispatchEvent(new Event("sync-all-complete"));
+
+    return {
+      ok,
+      offlineUploaded: offline.uploaded,
+      offlineRemaining: offline.failed,
+      sheetsSucceeded,
+      sheetsFailed,
+      message,
+      counts,
+    };
+  })();
 
   try {
-    const res = await apiFetch("/api/sheets/sync-all", { method: "POST" });
-    const data = await readApiJson<{
-      succeeded?: number;
-      failed?: number;
-      counts?: { pending: number; failed: number; total: number };
-    }>(res);
-    if (res.ok) {
-      sheetsSucceeded = data.succeeded ?? 0;
-      sheetsFailed = data.failed ?? 0;
-      counts = data.counts ?? counts;
-    }
-  } catch {
-    /* server unreachable — offline flush may still have worked */
+    return await syncInFlight;
+  } finally {
+    syncInFlight = null;
   }
-
-  const parts: string[] = [];
-  if (offline.uploaded > 0) {
-    parts.push(`${offline.uploaded} offline ${offline.uploaded === 1 ? "entry" : "entries"} uploaded`);
-  }
-  if (sheetsSucceeded > 0) {
-    parts.push(`${sheetsSucceeded} sheet ${sheetsSucceeded === 1 ? "row" : "rows"} synced`);
-  }
-  if (offline.failed > 0) {
-    parts.push(`${offline.failed} still waiting (offline)`);
-  }
-  if (sheetsFailed > 0) {
-    parts.push(`${sheetsFailed} sheet sync still failed`);
-  }
-
-  const ok = offline.failed === 0 && sheetsFailed === 0 && counts.total === 0;
-  const message =
-    parts.length > 0 ? parts.join(". ") + "." : "Everything is up to date.";
-
-  window.dispatchEvent(new Event("sync-all-complete"));
-
-  return {
-    ok,
-    offlineUploaded: offline.uploaded,
-    offlineRemaining: offline.failed,
-    sheetsSucceeded,
-    sheetsFailed,
-    message,
-    counts,
-  };
 }

@@ -2,7 +2,12 @@ import type { Db } from "mongodb";
 
 let indexesReady: Promise<void> | null = null;
 
-const INDEXES: { collection: string; keys: Record<string, 1 | -1> }[] = [
+const INDEXES: {
+  collection: string;
+  keys: Record<string, 1 | -1>;
+  unique?: boolean;
+}[] = [
+  { collection: "daily_production", keys: { businessId: 1, date: 1 }, unique: true },
   { collection: "stock", keys: { businessId: 1, name: 1 } },
   { collection: "stock_in", keys: { businessId: 1, date: -1, createdAt: -1 } },
   { collection: "stock_in", keys: { businessId: 1, stockId: 1 } },
@@ -21,8 +26,8 @@ export function ensureDbIndexes(db: Db): Promise<void> {
   if (!indexesReady) {
     indexesReady = (async () => {
       await Promise.all(
-        INDEXES.map(({ collection, keys }) =>
-          db.collection(collection).createIndex(keys, { background: true })
+        INDEXES.map(({ collection, keys, unique }) =>
+          db.collection(collection).createIndex(keys, { background: true, unique: unique === true })
         )
       );
     })().catch((err) => {

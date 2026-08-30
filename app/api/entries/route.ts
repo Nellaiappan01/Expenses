@@ -8,18 +8,14 @@ import {
   ensureExpenseName,
   ensureExpenseTag,
 } from "@/lib/expenseDefaultsHelpers";
-import {
-  buildSheetsPayload,
-  scheduleSheetsAppend,
-  type SheetsWebhookPayload,
-} from "@/lib/googleSheetsSync";
+import { scheduleSheetsAppend } from "@/lib/googleSheetsSync";
 import { invalidateBalanceCache } from "@/lib/balance";
 import { normalizeStoredAmount } from "@/lib/entryAmount";
 import type { Entry, EntryInput } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
-    const body: EntryInput = await request.json();
+    const body: EntryInput & { clientId?: string } = await request.json();
     const {
       name,
       amount,
@@ -33,9 +29,11 @@ export async function POST(request: NextRequest) {
       paymentDueDate,
       attachmentUrl,
       attachmentPublicId,
+      attachmentDriveUrl,
       tags,
       excludeFromProfitability,
       type = "expense",
+      clientId: rawClientId,
     } = body;
 
     if (!name?.trim()) {
@@ -56,6 +54,28 @@ export async function POST(request: NextRequest) {
 
     const userId = await getUserId(request);
     const db = await getDb();
+
+    const clientId = typeof rawClientId === "string" ? rawClientId.trim() : "";
+    if (clientId) {
+      const existing = await db.collection("entries").findOne({
+        businessId: userId,
+        clientId,
+        deleted: { $ne: true },
+      });
+      if (existing) {
+        return NextResponse.json(
+          {
+            ...existing,
+            _id: existing._id.toString(),
+            createdAt:
+              existing.createdAt instanceof Date
+                ? existing.createdAt.toISOString()
+                : existing.createdAt,
+          },
+          { status: 200 }
+        );
+      }
+    }
 
     if (type === "worker_payment") {
       await Promise.all([
@@ -117,6 +137,7 @@ export async function POST(request: NextRequest) {
         : {}),
       attachmentUrl: attachmentUrl?.trim() || undefined,
       attachmentPublicId: attachmentPublicId?.trim() || undefined,
+      attachmentDriveUrl: attachmentDriveUrl?.trim() || undefined,
       tags: normalizedTags?.length ? normalizedTags : undefined,
       ...(isExpenseWorkflow && excludeFromProfitability
         ? { excludeFromProfitability: true }
@@ -124,6 +145,7 @@ export async function POST(request: NextRequest) {
       businessId: userId,
       createdAt,
       sheetsSyncStatus: "pending",
+      ...(clientId ? { clientId } : {}),
     };
 
     const result = await db.collection("entries").insertOne(entry);
@@ -131,25 +153,7 @@ export async function POST(request: NextRequest) {
     invalidateBalanceCache(userId);
     console.info("[Entries] database save ok:", entryId);
 
-    const payload: SheetsWebhookPayload = {
-      action: "append",
-      entryId,
-      ...buildSheetsPayload({
-        type: entry.type,
-        date: entry.date,
-        name: entry.name,
-        category: entry.category ?? "",
-        amount: entry.amount,
-        method: entry.method,
-        note: entry.note ?? "",
-        bankName: entry.bankName,
-        approvedBy: entry.approvedBy ?? "",
-        approvalStatus: entry.approvalStatus,
-        paymentStatus: entry.paymentStatus,
-      }),
-    };
-
-    scheduleSheetsAppend(db, userId, entryId, payload);
+    scheduleSheetsAppend(db, userId, entryId);
 
     return NextResponse.json(
       {

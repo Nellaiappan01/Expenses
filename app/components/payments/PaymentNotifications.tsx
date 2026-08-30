@@ -40,7 +40,13 @@ export default function PaymentNotifications({ refreshTrigger = 0 }: { refreshTr
       const list = (data.notifications ?? []).filter(
         (n: { entryId?: string }) => n.entryId && !dismissed.has(n.entryId)
       );
-      setMessages(list);
+      const seen = new Set<string>();
+      const deduped = list.filter((n: { entryId: string; message: string }) => {
+        if (seen.has(n.entryId)) return false;
+        seen.add(n.entryId);
+        return true;
+      });
+      setMessages(deduped);
     } catch {
       if (seq === loadSeq.current) setMessages([]);
     }

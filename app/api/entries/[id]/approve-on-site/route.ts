@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { invalidateBalanceCache } from "@/lib/balance";
-import { ensureApproverName } from "@/lib/expenseDefaultsHelpers";
-import { NOT_DELETED_MATCH, recordEntryAuditLogs } from "@/lib/entryAudit";
+import { approveEntryOnSite } from "@/lib/approveOnSite";
 import { serializeEntry } from "@/lib/entrySerialize";
-import { scheduleSheetsAdjustment } from "@/lib/googleSheetsSync";
 import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import { canUserModifyEntry } from "@/lib/paymentWorkflow";
 import type { Entry } from "@/lib/types";
+import { NOT_DELETED_MATCH } from "@/lib/entryAudit";
+import { invalidateBalanceCache } from "@/lib/balance";
 
 /** User sets Approved by on site — no full adjust form, no admin. */
 export async function POST(
@@ -57,71 +56,25 @@ export async function POST(
       return NextResponse.json({ error: "Entry is not awaiting on-site approval" }, { status: 400 });
     }
 
-    await ensureApproverName(db, userId, approvedBy);
-
-    const approvedAt = new Date();
-    const editedBy = body.editedBy?.trim() || approvedBy;
-
-    await recordEntryAuditLogs(db, {
-      entryId: id,
-      businessId: userId,
-      action: "update",
-      changes: [
-        {
-          field: "approvalStatus",
-          originalValue: "pending",
-          newValue: "approved",
-        },
-        {
-          field: "approvedBy",
-          originalValue: existing.approvedBy ?? null,
-          newValue: approvedBy,
-        },
-        {
-          field: "paymentDueDate",
-          originalValue: existing.paymentDueDate ?? null,
-          newValue: paymentDueDate,
-        },
-      ],
-      editedBy,
-      reason: "Approved on site",
+    const result = await approveEntryOnSite(db, userId, id, {
+      approvedBy,
+      paymentDueDate,
+      editedBy: body.editedBy?.trim() || approvedBy,
     });
 
-    const result = await db.collection("entries").findOneAndUpdate(
-      { _id: new ObjectId(id), businessId: userId, ...NOT_DELETED_MATCH },
-      {
-        $set: {
-          approvalStatus: "approved",
-          approvedBy,
-          approvedByLower: approvedBy.toLowerCase(),
-          approvedAt,
-          paymentDueDate,
-          paymentStatus: "pending",
-          isEdited: true,
-          editedAt: approvedAt,
-          editedBy,
-        },
-      },
-      { returnDocument: "after" }
-    );
-
-    if (!result) {
-      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
     invalidateBalanceCache(userId);
 
-    scheduleSheetsAdjustment(
-      db,
-      userId,
-      id,
-      "update",
-      result as Record<string, unknown>,
-      existing as Record<string, unknown>
-    );
+    const updated = await db.collection("entries").findOne({
+      _id: new ObjectId(id),
+      businessId: userId,
+    });
 
     return NextResponse.json({
-      ...serializeEntry(result as Record<string, unknown>),
+      ...serializeEntry(updated as Record<string, unknown>),
       sheetsSyncStatus: "pending",
       sheetsSyncError: null,
     });

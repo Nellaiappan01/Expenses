@@ -10,6 +10,7 @@ export type UserBranding = {
 export type UserIntegrations = {
   googleSheetUrl: string;
   appsScriptWebhookUrl: string;
+  googleDriveFolderUrl: string;
 };
 
 export type UserSettings = {
@@ -18,7 +19,7 @@ export type UserSettings = {
 };
 
 export const SHEET_COLUMN_PATTERN =
-  "Date | Opening Balance | Category | Expenses Amount | Notes | Add on | Source | Closing Balance | Requested by | Approved by | Payment Status | Adjust Reason | Entry ID";
+  "Date | Opening Balance | Category | Expenses Amount | Notes | Add on | Source | Closing Balance | Requested by | Approved by | Payment Status | Adjust Reason | Entry ID | Tonnage | Drive File URL";
 
 export const SHEET_COLUMNS = [
   "Date",
@@ -34,6 +35,8 @@ export const SHEET_COLUMNS = [
   "Payment Status",
   "Adjust Reason",
   "Entry ID",
+  "Tonnage",
+  "Drive File URL",
 ] as const;
 
 export const DEFAULT_BRANDING: UserBranding = {
@@ -45,6 +48,7 @@ export const DEFAULT_BRANDING: UserBranding = {
 export const DEFAULT_INTEGRATIONS: UserIntegrations = {
   googleSheetUrl: "",
   appsScriptWebhookUrl: "",
+  googleDriveFolderUrl: "",
 };
 
 const HARIHARAN_IDS = new Set(["hariharan@gmail.com", "hariharan_gmail.com"]);
@@ -65,6 +69,7 @@ export function envDefaultSettings(): UserSettings {
     integrations: {
       googleSheetUrl: process.env.GOOGLE_SHEETS_URL?.trim() || "",
       appsScriptWebhookUrl: process.env.GOOGLE_SHEETS_WEBHOOK_URL?.trim() || "",
+      googleDriveFolderUrl: process.env.GOOGLE_DRIVE_FOLDER_URL?.trim() || "",
     },
   };
 }
@@ -81,6 +86,7 @@ function mergeIntegrations(stored?: Partial<UserIntegrations> | null): UserInteg
   return {
     googleSheetUrl: stored?.googleSheetUrl?.trim() || "",
     appsScriptWebhookUrl: stored?.appsScriptWebhookUrl?.trim() || "",
+    googleDriveFolderUrl: stored?.googleDriveFolderUrl?.trim() || "",
   };
 }
 
@@ -114,6 +120,10 @@ export async function saveUserSettings(
       patch.integrations?.appsScriptWebhookUrl !== undefined
         ? patch.integrations.appsScriptWebhookUrl.trim()
         : current.integrations.appsScriptWebhookUrl,
+    googleDriveFolderUrl:
+      patch.integrations?.googleDriveFolderUrl !== undefined
+        ? patch.integrations.googleDriveFolderUrl.trim()
+        : current.integrations.googleDriveFolderUrl,
   };
 
   await db.collection("config").updateOne(
@@ -184,6 +194,14 @@ export async function getSheetsWebhookUrl(db: Db, businessId: string): Promise<s
   const userUrl = integrations.appsScriptWebhookUrl?.trim();
   if (userUrl) return userUrl;
   const envUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL?.trim();
+  return envUrl || null;
+}
+
+export async function getGoogleDriveFolderUrl(db: Db, businessId: string): Promise<string | null> {
+  const { integrations } = await getUserSettings(db, businessId);
+  const userUrl = integrations.googleDriveFolderUrl?.trim();
+  if (userUrl) return userUrl;
+  const envUrl = process.env.GOOGLE_DRIVE_FOLDER_URL?.trim();
   return envUrl || null;
 }
 

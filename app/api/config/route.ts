@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
       integrations: {
         googleSheetUrl: settings.integrations.googleSheetUrl,
         appsScriptWebhookUrl: settings.integrations.appsScriptWebhookUrl,
+        googleDriveFolderUrl: settings.integrations.googleDriveFolderUrl,
         hasAppsScriptWebhook: !!settings.integrations.appsScriptWebhookUrl,
+        hasGoogleDriveFolder: !!settings.integrations.googleDriveFolderUrl,
       },
     };
     return NextResponse.json(merged);
@@ -77,7 +79,9 @@ export async function PATCH(request: NextRequest) {
       integrations: {
         googleSheetUrl: settings.integrations.googleSheetUrl,
         appsScriptWebhookUrl: settings.integrations.appsScriptWebhookUrl,
+        googleDriveFolderUrl: settings.integrations.googleDriveFolderUrl,
         hasAppsScriptWebhook: !!settings.integrations.appsScriptWebhookUrl,
+        hasGoogleDriveFolder: !!settings.integrations.googleDriveFolderUrl,
       },
     });
   } catch (error) {

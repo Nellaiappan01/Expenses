@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useConfig } from "@/app/context/ConfigContext";
 import { useUser } from "@/app/context/UserContext";
 import { isPublicRoute } from "@/lib/publicRoutes";
@@ -131,10 +131,11 @@ export default function Navbar() {
   const router = useRouter();
   const { config } = useConfig() ?? {};
   const { userId, username, isAdmin } = useUser();
+  const [ready, setReady] = useState(false);
 
-  if (pathname === "/select-user") return null;
-
-  if (isPublicRoute(pathname)) return null;
+  useEffect(() => {
+    setReady(true);
+  }, []);
 
   const features = config?.features ?? { expenses: false, workers: false, stock: false };
   const hasStock = !!features.stock;
@@ -142,7 +143,7 @@ export default function Navbar() {
   const viewSlug = publicViewSlug(username, userId);
   const viewPath = viewSlug ? publicStockViewPath(viewSlug) : null;
   const onPublicView = viewPath ? pathname === viewPath || pathname === `${viewPath}/` : false;
-
+  const hideNav = !ready || pathname === "/select-user" || isPublicRoute(pathname);
   const useStockBar = hasStock && (onStockArea || onPublicView);
 
   const navItems = useMemo(
@@ -162,10 +163,13 @@ export default function Navbar() {
   );
 
   useEffect(() => {
+    if (hideNav) return;
     for (const { href } of navItems) {
       router.prefetch(href);
     }
-  }, [router, navItems]);
+  }, [router, navItems, hideNav]);
+
+  if (hideNav) return null;
 
   const isActive = (href: string) =>
     useStockBar

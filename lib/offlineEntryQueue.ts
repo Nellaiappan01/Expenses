@@ -87,15 +87,15 @@ export async function flushOfflineQueue(): Promise<FlushOfflineResult> {
   const errors: string[] = [];
 
   for (const item of queue) {
-    const { clientId: _c, queuedAt: _q, ...payload } = item;
+    const { clientId, queuedAt: _q, ...payload } = item;
     try {
       const res = await apiFetch("/api/entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, clientId }),
       });
 
-      if (res.ok || res.status === 502) {
+      if (res.ok || res.status === 502 || res.status === 200) {
         uploaded += 1;
         continue;
       }

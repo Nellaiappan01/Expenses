@@ -12,9 +12,17 @@ import { formatDateDDMMYYYY } from "@/lib/dateFormat";
 function WorkflowStatusIcon({
   kind,
 }: {
-  kind: "pending_approval" | "payment_pending" | "paid" | "rejected";
+  kind: "pending_approval" | "payment_pending" | "paid" | "rejected" | "nil";
 }) {
   const className = "h-3.5 w-3.5 shrink-0";
+
+  if (kind === "nil") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+      </svg>
+    );
+  }
 
   if (kind === "pending_approval") {
     return (
@@ -23,7 +31,7 @@ function WorkflowStatusIcon({
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth={2}
-          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
         />
       </svg>
     );
@@ -69,21 +77,57 @@ function WorkflowStatusIcon({
 
 export function PaymentStatusBadge({
   entry,
+  onPendingApprovalClick,
+  iconOnly = false,
 }: {
   entry: Pick<
     Entry,
-    "type" | "approvalStatus" | "paymentStatus" | "paymentVerifiedMethod" | "paymentDate" | "paymentReference"
+    "type" | "approvalStatus" | "paymentStatus" | "paymentVerifiedMethod" | "paymentDate" | "paymentReference" | "isNil"
   >;
+  onPendingApprovalClick?: () => void;
+  /** Clock only — used next to the delete icon on Track. */
+  iconOnly?: boolean;
 }) {
   const meta = workflowBadgeMeta(entry);
   if (!meta) return null;
 
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.className}`}
-    >
+  const clickable = meta.icon === "pending_approval" && Boolean(onPendingApprovalClick);
+  const className = iconOnly
+    ? `inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${meta.className} ${
+        clickable ? "active:scale-[0.98]" : ""
+      }`
+    : `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.className} ${
+        clickable ? "active:scale-[0.98]" : ""
+      }`;
+  const inner = (
+    <>
       <WorkflowStatusIcon kind={meta.icon} />
-      {meta.label}
+      {iconOnly ? null : meta.label}
+    </>
+  );
+
+  if (clickable) {
+    return (
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onPendingApprovalClick?.();
+        }}
+        className={className}
+        aria-label={iconOnly ? "Pending approval — set approved by" : "Set approved by"}
+        title={iconOnly ? "Pending approval" : "Set approved by"}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <span className={className} title={iconOnly ? meta.label : undefined} aria-label={iconOnly ? meta.label : undefined}>
+      {inner}
     </span>
   );
 }

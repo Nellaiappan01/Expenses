@@ -3,6 +3,8 @@ import { ObjectId, type Db } from "mongodb";
 import { formatIsoDateForSheet } from "./dateFormat";
 import { formatSheetPaymentStatus } from "./paymentWorkflow";
 import { getSheetsWebhookUrl } from "./userSettings";
+import { friendlySheetsError } from "./sheetsSyncCopy";
+import { sheetDriveFileUrl } from "./googleDriveFolder";
 import type { ApprovalStatus, EntryType, PaymentStatus, SheetsSyncStatus } from "./types";
 
 export type SheetsMatchFingerprint = {
@@ -15,7 +17,7 @@ export type SheetsMatchFingerprint = {
 
 /** Payload sent to Google Apps Script webhook. */
 export type SheetsWebhookPayload = {
-  action?: "append" | "update" | "delete";
+  action?: "append" | "update" | "delete" | "upsertDailyProduction" | "deleteDailyProduction";
   entryId?: string;
   match?: SheetsMatchFingerprint;
   entryType: EntryType | string;
@@ -31,6 +33,12 @@ export type SheetsWebhookPayload = {
   paymentStatus?: string;
   /** Filled when an entry is edited via Adjust (column L in the sheet). */
   adjustReason?: string;
+  /** Column O — Google Drive receipt link. */
+  driveFileUrl?: string;
+  /** Column N — daily production tonnes only (never copied onto expense rows). */
+  tonnage?: number;
+  /** Alias for older Apps Script that read `tonnes`. */
+  tonnes?: number;
 };
 
 export type SheetsSyncResult = {
@@ -42,8 +50,14 @@ export type SheetsSyncResult = {
   timedOut?: boolean;
 };
 
-/** Max wait for Apps Script webhook — avoids hanging requests indefinitely. */
-const SHEETS_FETCH_TIMEOUT_MS = 20_000;
+/** Max entries synced per Sync All request (Vercel 60s limit). */
+export const SHEETS_SYNC_BATCH_SIZE = 3;
+
+/** Wait for Apps Script — keep this under ~20s so a stuck sheet fails fast instead of hanging Sync All. */
+const SHEETS_FETCH_TIMEOUT_MS = 18_000;
+
+/** Prevent two sync workers from updating the same row at once. */
+const SHEETS_SYNC_LEASE_MS = 120_000;
 
 export function sheetRowMayExist(entry: Record<string, unknown> | null | undefined): boolean {
   if (!entry) return false;
@@ -112,6 +126,10 @@ export function buildSheetsPayload(row: {
   approvedBy?: string;
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
+  isNil?: boolean;
+  attachmentDriveUrl?: string;
+  attachmentPublicId?: string;
+  attachmentUrl?: string;
 }): SheetsWebhookPayload {
   const absAmount = Math.abs(Number(row.amount) || 0);
   let category = row.category?.trim() ?? "";
@@ -123,7 +141,7 @@ export function buildSheetsPayload(row: {
 
   if (row.type === "expense") {
     expenseAmount = absAmount;
-    requestedBy = row.name.trim();
+    requestedBy = row.isNil ? "" : row.name.trim();
   } else if (row.type === "rotation_cash") {
     if (row.amount > 0) {
       addOn = row.amount;
@@ -153,7 +171,7 @@ export function buildSheetsPayload(row: {
     date: formatIsoDateForSheet(row.date),
     category,
     expenseAmount,
-    notes: row.note?.trim() ?? "",
+    notes: row.isNil ? "No work this day" : row.note?.trim() ?? "",
     addOn,
     source,
     requestedBy,
@@ -162,7 +180,9 @@ export function buildSheetsPayload(row: {
       type: row.type,
       approvalStatus: row.approvalStatus,
       paymentStatus: row.paymentStatus,
+      isNil: row.isNil,
     }),
+    driveFileUrl: sheetDriveFileUrl(row),
   };
 }
 
@@ -202,6 +222,10 @@ function entryDocToSheetsRow(entry: Record<string, unknown>) {
     approvedBy: (entry.approvedBy as string) ?? "",
     approvalStatus: entry.approvalStatus as ApprovalStatus | undefined,
     paymentStatus: entry.paymentStatus as PaymentStatus | undefined,
+    isNil: Boolean(entry.isNil),
+    attachmentDriveUrl: typeof entry.attachmentDriveUrl === "string" ? entry.attachmentDriveUrl : "",
+    attachmentPublicId: typeof entry.attachmentPublicId === "string" ? entry.attachmentPublicId : "",
+    attachmentUrl: typeof entry.attachmentUrl === "string" ? entry.attachmentUrl : "",
   };
 }
 
@@ -253,21 +277,82 @@ export async function appendEntryToGoogleSheets(
   }
 }
 
+/** Ask Apps Script to recalculate opening/closing balances for every row (fixes legacy balance gaps). */
+export async function recalculateGoogleSheetBalances(
+  webhookUrl: string
+): Promise<SheetsSyncResult> {
+  const webhook = webhookUrl.trim();
+  if (!webhook) {
+    return { ok: false, status: "failed", error: "Apps Script webhook URL is not configured" };
+  }
+
+  try {
+    const res = await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "recalculate" }),
+      signal: AbortSignal.timeout(SHEETS_FETCH_TIMEOUT_MS),
+    });
+    const responseBody = await res.text().catch(() => "");
+    return interpretSheetsResponse(res, responseBody);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "recalculate_failed";
+    if (isSheetsTimeout(error)) {
+      return {
+        ok: false,
+        status: "pending",
+        timedOut: true,
+        error: "Google Sheet is still recalculating balances.",
+      };
+    }
+    return { ok: false, status: "failed", error: message };
+  }
+}
+
+async function claimSheetsSyncLease(
+  db: Db,
+  entryId: string,
+  businessId: string
+): Promise<boolean> {
+  const now = new Date();
+  const leaseUntil = new Date(now.getTime() + SHEETS_SYNC_LEASE_MS);
+  const result = await db.collection("entries").updateOne(
+    {
+      _id: new ObjectId(entryId),
+      businessId,
+      $or: [{ sheetsSyncLeaseUntil: { $exists: false } }, { sheetsSyncLeaseUntil: { $lt: now } }],
+    },
+    { $set: { sheetsSyncLeaseUntil: leaseUntil } }
+  );
+  return result.modifiedCount > 0;
+}
+
+async function releaseSheetsSyncLease(db: Db, entryId: string, businessId: string) {
+  await db.collection("entries").updateOne(
+    { _id: new ObjectId(entryId), businessId },
+    { $unset: { sheetsSyncLeaseUntil: "" } }
+  );
+}
+
 async function persistSyncResult(
   db: Db,
   entryId: string,
   businessId: string,
   result: SheetsSyncResult
 ) {
-  if (result.ok) {
-    await markEntrySyncStatus(db, entryId, businessId, "synced");
-    return;
+  try {
+    if (result.ok) {
+      await markEntrySyncStatus(db, entryId, businessId, "synced");
+      return;
+    }
+    if (result.timedOut || result.status === "pending") {
+      await markEntrySyncStatus(db, entryId, businessId, "pending", result.error);
+      return;
+    }
+    await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
+  } finally {
+    await releaseSheetsSyncLease(db, entryId, businessId);
   }
-  if (result.timedOut || result.status === "pending") {
-    await markEntrySyncStatus(db, entryId, businessId, "pending", result.error);
-    return;
-  }
-  await markEntrySyncStatus(db, entryId, businessId, "failed", result.error);
 }
 
 export async function markEntrySyncStatus(
@@ -304,6 +389,18 @@ export async function syncEntryById(
     return { ok: false, status: "failed", error: "Entry not found", entryId };
   }
 
+  if (entry.deleted) {
+    const result = await syncEntryAdjustment(
+      db,
+      businessId,
+      entryId,
+      "delete",
+      entry as Record<string, unknown>,
+      entry as Record<string, unknown>
+    );
+    return { ...result, entryId };
+  }
+
   const result = await upsertEntryToSheets(
     db,
     businessId,
@@ -315,7 +412,7 @@ export async function syncEntryById(
   return { ...result, entryId };
 }
 
-/** Update the existing sheet row when it may already exist; otherwise append. Never double-append on retry. */
+/** Idempotent sheet write: update the row for this Entry ID, or append once if it is missing. */
 export async function upsertEntryToSheets(
   db: Db,
   businessId: string,
@@ -331,34 +428,28 @@ export async function upsertEntryToSheets(
     return { ok: false, status: "failed", error };
   }
 
-  await markEntrySyncStatus(db, entryId, businessId, "pending");
-
-  const source = originalEntry ?? entryDoc;
-  if (sheetRowMayExist(source) || sheetRowMayExist(entryDoc)) {
-    const updated = await postSheetsAdjustment(
-      webhookUrl,
-      entryId,
-      "update",
-      entryDoc,
-      originalEntry,
-      adjustReason
-    );
-    if (updated.ok || updated.timedOut || !isSheetRowNotFound(updated.error)) {
-      await persistSyncResult(db, entryId, businessId, updated);
-      return updated;
-    }
+  const leased = await claimSheetsSyncLease(db, entryId, businessId);
+  if (!leased) {
+    return {
+      ok: false,
+      status: "pending",
+      error: "Sheet sync already running for this entry — wait, do not tap Sync All again.",
+    };
   }
 
+  await markEntrySyncStatus(db, entryId, businessId, "pending");
+
+  const fingerprintSource = originalEntry ?? entryDoc;
   const payload: SheetsWebhookPayload = {
-    action: "append",
+    action: "update",
     entryId,
-    match: originalEntry ? buildSheetsMatch(entryDocToSheetsRow(originalEntry)) : undefined,
+    match: buildSheetsMatch(entryDocToSheetsRow(fingerprintSource)),
     ...buildSheetsPayload(entryDocToSheetsRow(entryDoc)),
     adjustReason: adjustReason?.trim() || "",
   };
-  const appended = await appendEntryToGoogleSheets(payload, webhookUrl);
-  await persistSyncResult(db, entryId, businessId, appended);
-  return appended;
+  const result = await appendEntryToGoogleSheets(payload, webhookUrl);
+  await persistSyncResult(db, entryId, businessId, result);
+  return result;
 }
 
 /** Sync an edited or deleted entry to Google Sheets (update/delete row + recalc balances). */
@@ -392,6 +483,7 @@ export async function syncEntryAdjustment(
     originalEntry,
     adjustReason
   );
+  await persistSyncResult(db, entryId, businessId, result);
   return result;
 }
 
@@ -410,39 +502,51 @@ async function postSheetsAdjustment(
     ...buildSheetsPayload(entryDocToSheetsRow(entryDoc)),
     adjustReason: adjustReason?.trim() || "",
   };
-  return appendEntryToGoogleSheets(payload, webhookUrl);
+  const result = await appendEntryToGoogleSheets(payload, webhookUrl);
+  if (action === "delete" && !result.ok && isSheetRowNotFound(result.error)) {
+    return { ok: true, status: "synced" };
+  }
+  return result;
 }
 
-async function runSheetsAppend(
-  db: Db,
-  businessId: string,
-  entryId: string,
-  payload: SheetsWebhookPayload
-) {
+async function runSheetsAppend(db: Db, businessId: string, entryId: string) {
   try {
-    const webhookUrl = (await getSheetsWebhookUrl(db, businessId)) ?? "";
-    const result = await appendEntryToGoogleSheets(payload, webhookUrl);
-    await persistSyncResult(db, entryId, businessId, result);
+    const entry = await db.collection("entries").findOne({
+      _id: new ObjectId(entryId),
+      businessId,
+    });
+    if (!entry) {
+      await markEntrySyncStatus(
+        db,
+        entryId,
+        businessId,
+        "pending",
+        "Entry not found for sheet sync"
+      );
+      return;
+    }
+    const result = await upsertEntryToSheets(
+      db,
+      businessId,
+      entryId,
+      entry as Record<string, unknown>,
+      entry as Record<string, unknown>
+    );
     if (result.ok) {
-      console.info(`[Google Sheets] background append ok: ${entryId}`);
+      console.info(`[Google Sheets] background upsert ok: ${entryId}`);
     } else {
-      console.error(`[Google Sheets] background append failed: ${entryId}`, result.error);
+      console.error(`[Google Sheets] background upsert failed: ${entryId}`, result.error);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "sync_failed";
-    console.error(`[Google Sheets] background append error: ${entryId}`, message);
+    console.error(`[Google Sheets] background upsert error: ${entryId}`, message);
     await markEntrySyncStatus(db, entryId, businessId, "pending", message).catch(() => {});
   }
 }
 
 /** Save to DB first, sync sheet row after the HTTP response is sent. */
-export function scheduleSheetsAppend(
-  db: Db,
-  businessId: string,
-  entryId: string,
-  payload: SheetsWebhookPayload
-) {
-  after(() => runSheetsAppend(db, businessId, entryId, payload));
+export function scheduleSheetsAppend(db: Db, businessId: string, entryId: string) {
+  after(() => runSheetsAppend(db, businessId, entryId));
 }
 
 /** Update/delete sheet row after the HTTP response is sent. */
@@ -505,18 +609,37 @@ export async function retryAllFailedSyncs(db: Db, businessId: string) {
 export async function retryAllSheetsSyncs(
   db: Db,
   businessId: string,
-  statuses: SheetsSyncStatus[] = ["pending", "failed"]
+  statuses: SheetsSyncStatus[] = ["pending", "failed"],
+  limit = SHEETS_SYNC_BATCH_SIZE
 ) {
-  const failed = await db
+  const live = await db
     .collection("entries")
     .find({
       businessId,
       deleted: { $ne: true },
       sheetsSyncStatus: { $in: statuses },
-      $nor: [SHEETS_SYNC_DEFERRED_NOR],
+      $nor: USER_SHEETS_SYNC_NOR,
     })
     .sort({ createdAt: 1 })
+    .limit(limit)
     .toArray();
+
+  const remaining = Math.max(0, limit - live.length);
+  const deletedPending =
+    remaining > 0
+      ? await db
+          .collection("entries")
+          .find({
+            businessId,
+            deleted: true,
+            sheetsSyncStatus: { $in: statuses },
+          })
+          .sort({ deletedAt: 1, createdAt: 1 })
+          .limit(remaining)
+          .toArray()
+      : [];
+
+  const failed = [...live, ...deletedPending];
 
   const results: { entryId: string; ok: boolean; error?: string }[] = [];
 
@@ -529,12 +652,21 @@ export async function retryAllSheetsSyncs(
   return results;
 }
 
+/** Paid expenses — Google Sheet is updated by admin payment, not user Sync All. Nil days still sync. */
+export const USER_SHEETS_SYNC_EXCLUDED_NOR = {
+  type: "expense",
+  paymentStatus: "paid",
+  isNil: { $ne: true },
+} as const;
+
 /** Workflow expenses sync only after payment verify — not a sheets queue item yet. */
 export const SHEETS_SYNC_DEFERRED_NOR = {
   type: "expense",
   paymentStatus: "pending",
   sheetsSyncedAt: { $exists: false },
 } as const;
+
+const USER_SHEETS_SYNC_NOR = [SHEETS_SYNC_DEFERRED_NOR, USER_SHEETS_SYNC_EXCLUDED_NOR];
 
 export function buildSheetsSyncQueueFilter(
   businessId: string,
@@ -544,7 +676,7 @@ export function buildSheetsSyncQueueFilter(
     businessId,
     deleted: { $ne: true },
     sheetsSyncStatus: status ?? { $in: ["pending", "failed"] },
-    $nor: [SHEETS_SYNC_DEFERRED_NOR],
+    $nor: USER_SHEETS_SYNC_NOR,
   };
 }
 
@@ -552,11 +684,46 @@ export async function getSheetsSyncCounts(db: Db, businessId: string) {
   const base = {
     businessId,
     deleted: { $ne: true },
-    $nor: [SHEETS_SYNC_DEFERRED_NOR],
+    $nor: USER_SHEETS_SYNC_NOR,
   };
-  const [pending, failed] = await Promise.all([
+  const [pending, failed, deletedPending, deletedFailed] = await Promise.all([
     db.collection("entries").countDocuments({ ...base, sheetsSyncStatus: "pending" }),
     db.collection("entries").countDocuments({ ...base, sheetsSyncStatus: "failed" }),
+    db.collection("entries").countDocuments({
+      businessId,
+      deleted: true,
+      sheetsSyncStatus: "pending",
+    }),
+    db.collection("entries").countDocuments({
+      businessId,
+      deleted: true,
+      sheetsSyncStatus: "failed",
+    }),
   ]);
-  return { pending, failed, total: pending + failed };
+  const removing = deletedPending + deletedFailed;
+  return {
+    pending: pending + deletedPending,
+    failed: failed + deletedFailed,
+    removing,
+    total: pending + failed + removing,
+  };
+}
+
+/** Short error samples for the sync banner (why rows failed). */
+export async function getSheetsSyncFailureSample(db: Db, businessId: string, limit = 2) {
+  const rows = await db
+    .collection("entries")
+    .find({
+      businessId,
+      deleted: { $ne: true },
+      sheetsSyncStatus: "failed",
+      $nor: USER_SHEETS_SYNC_NOR,
+    })
+    .project({ sheetsSyncError: 1 })
+    .limit(limit)
+    .toArray();
+
+  return rows
+    .map((r) => friendlySheetsError(String(r.sheetsSyncError || "").trim()))
+    .filter(Boolean);
 }

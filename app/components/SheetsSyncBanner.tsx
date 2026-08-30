@@ -6,6 +6,11 @@ import { apiFetch } from "@/lib/api";
 import { syncEverything } from "@/lib/clientSync";
 import { LEDGER_DATA_CHANGED } from "@/lib/clientDataCache";
 import { getOfflineQueueCount } from "@/lib/offlineEntryQueue";
+import { sheetsEtaLabel } from "@/lib/sheetsSyncCopy";
+
+function etaLabel(rows: number): string {
+  return sheetsEtaLabel(rows);
+}
 
 export default function SheetsSyncBanner({
   refreshTrigger = 0,
@@ -14,19 +19,28 @@ export default function SheetsSyncBanner({
   refreshTrigger?: number;
   onRefresh?: () => void;
 }) {
-  const [counts, setCounts] = useState({ pending: 0, failed: 0, total: 0 });
+  const [counts, setCounts] = useState({ pending: 0, failed: 0, total: 0, removing: 0 });
+  const [failureHints, setFailureHints] = useState<string[]>([]);
   const [offlineCount, setOfflineCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
-  const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [isOnline, setIsOnline] = useState(true);
   const syncingRef = useRef(false);
+  const startTotalRef = useRef(0);
 
   const refreshCounts = useCallback(async () => {
     setOfflineCount(getOfflineQueueCount());
     try {
       const res = await apiFetch("/api/sheets/status");
       if (res.ok) {
-        setCounts(await res.json());
+        const data = await res.json();
+        setCounts({
+          pending: data.pending ?? 0,
+          failed: data.failed ?? 0,
+          total: data.total ?? 0,
+          removing: data.removing ?? 0,
+        });
+        setFailureHints(Array.isArray(data.failures) ? data.failures : []);
       }
     } catch {
       /* server unreachable */
@@ -41,17 +55,30 @@ export default function SheetsSyncBanner({
       if (!navigator.onLine) return;
 
       syncingRef.current = true;
+      startTotalRef.current = Math.max(counts.total + offline, 1);
       setSyncing(true);
-      if (!silent) setMessage("");
+      setErrorMessage("");
 
       try {
         const result = await syncEverything();
-        setMessage(result.message);
-        if (result.counts) setCounts(result.counts);
+        if (result.ok) {
+          setCounts({ pending: 0, failed: 0, total: 0, removing: 0 });
+          setErrorMessage("");
+        } else if (result.counts) {
+          setCounts({
+            pending: result.counts.pending ?? 0,
+            failed: result.counts.failed ?? 0,
+            total: result.counts.total ?? 0,
+            removing: result.counts.removing ?? 0,
+          });
+          if (result.counts.total > 0) {
+            setErrorMessage("Some rows did not sync. Tap Sync All to retry.");
+          }
+        }
         setOfflineCount(getOfflineQueueCount());
         onRefresh?.();
       } catch {
-        if (!silent) setMessage("Sync failed. Try again.");
+        if (!silent) setErrorMessage("Sync failed. Try again.");
       } finally {
         syncingRef.current = false;
         setSyncing(false);
@@ -105,13 +132,17 @@ export default function SheetsSyncBanner({
   }, [runSyncAll]);
 
   const grandTotal = offlineCount + counts.total;
-  const showBanner = grandTotal > 0 || message || !isOnline;
+  const showBanner = grandTotal > 0 || syncing || !isOnline;
+  const remaining = grandTotal;
+  const started = Math.max(startTotalRef.current, remaining);
+  const done = syncing ? Math.max(0, started - remaining) : 0;
+  const eta = etaLabel(remaining);
 
   if (!showBanner) return null;
 
   return (
     <div
-      className={`rounded-xl px-3 py-2.5 ring-1 ${
+      className={`rounded-2xl px-3 py-3 ring-1 ${
         !isOnline
           ? "bg-slate-100 ring-slate-200"
           : counts.failed > 0
@@ -119,61 +150,94 @@ export default function SheetsSyncBanner({
             : "bg-amber-50 ring-amber-200/80"
       }`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm">
-          {!isOnline && (
-            <p className="font-medium text-slate-800">
-              You&apos;re offline — entries save on this device.
+      {!isOnline ? (
+        <p className="text-sm font-semibold text-slate-800">Offline — entries save on this phone.</p>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-[#0B4A8C]">
+                {syncing ? "Writing to Google Sheet" : "Google Sheet"}
+              </p>
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs font-semibold tabular-nums text-[#5A7FA5]">
+                {syncing ? (
+                  remaining > 0 ? (
+                    <>
+                      <span>{done} done</span>
+                      <span>{remaining} left</span>
+                      <span className="text-[#0B4A8C]">{eta}</span>
+                    </>
+                  ) : (
+                    "Finishing…"
+                  )
+                ) : remaining > 0 ? (
+                  <>
+                    <span>
+                      {remaining} {remaining === 1 ? "row" : "rows"}
+                    </span>
+                    <span className="text-[#0B4A8C]">{eta}</span>
+                  </>
+                ) : (
+                  "Up to date"
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => runSyncAll(false)}
+              disabled={syncing || !isOnline || remaining === 0}
+              className="shrink-0 rounded-xl bg-[#0B4A8C] px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+            >
+              {syncing ? "Syncing…" : "Sync All"}
+            </button>
+          </div>
+
+          {grandTotal > 0 ? (
+            <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+              <Link
+                href="/track?sheetsSync=pending"
+                className="rounded-xl bg-white/80 px-2 py-2 text-center ring-1 ring-[#D6E6F5]"
+              >
+                <p className="text-lg font-extrabold tabular-nums text-[#0B4A8C]">{counts.pending}</p>
+                <p className="text-[10px] font-semibold text-[#7A9BB8]">Waiting</p>
+              </Link>
+              <Link
+                href="/track?sheetsSync=failed"
+                className="rounded-xl bg-white/80 px-2 py-2 text-center ring-1 ring-[#D6E6F5]"
+              >
+                <p className="text-lg font-extrabold tabular-nums text-red-700">{counts.failed}</p>
+                <p className="text-[10px] font-semibold text-[#7A9BB8]">Failed</p>
+              </Link>
+              <div className="rounded-xl bg-white/80 px-2 py-2 text-center ring-1 ring-[#D6E6F5]">
+                <p className="text-lg font-extrabold tabular-nums text-[#0B4A8C]">{eta || "—"}</p>
+                <p className="text-[10px] font-semibold text-[#7A9BB8]">Time</p>
+              </div>
+            </div>
+          ) : null}
+          {offlineCount > 0 ? (
+            <p className="mt-1.5 text-[11px] font-medium text-[#5A7FA5]">{offlineCount} saved on this phone</p>
+          ) : null}
+
+          {syncing && started > 0 ? (
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/70">
+              <div
+                className="h-full rounded-full bg-[#0B4A8C] transition-[width]"
+                style={{ width: `${Math.min(100, Math.round((done / started) * 100))}%` }}
+              />
+            </div>
+          ) : null}
+
+          {counts.removing > 0 && !syncing ? (
+            <p className="mt-2 text-xs font-medium leading-relaxed text-[#0B4A8C]">
+              {counts.removing === 1 ? "1 deleted entry" : `${counts.removing} deleted entries`} still on
+              the Google Sheet. Tap Sync All to remove {counts.removing === 1 ? "it" : "them"}.
             </p>
-          )}
-          {grandTotal > 0 && (
-            <p className={!isOnline ? "mt-0.5 text-xs text-slate-600" : "text-amber-900"}>
-              {syncing && (
-                <span className="mr-1 font-semibold">
-                  Syncing… {Math.max(0, counts.total)} left
-                </span>
-              )}
-              {!syncing && counts.total > 0 && (
-                <span className="mr-1 font-semibold">
-                  Sheet progress: {counts.pending + counts.failed} left
-                </span>
-              )}
-              {offlineCount > 0 && (
-                <span>
-                  <strong>{offlineCount}</strong> saved offline
-                  {counts.total > 0 ? " · " : ""}
-                </span>
-              )}
-              {counts.pending > 0 && (
-                <Link
-                  href="/track?sheetsSync=pending"
-                  className="font-bold underline decoration-amber-400 underline-offset-2 hover:text-amber-950"
-                >
-                  {counts.pending} sheet pending
-                </Link>
-              )}
-              {counts.pending > 0 && counts.failed > 0 && ", "}
-              {counts.failed > 0 && (
-                <Link
-                  href="/track?sheetsSync=failed"
-                  className="font-bold text-red-700 underline decoration-red-300 underline-offset-2 hover:text-red-900"
-                >
-                  {counts.failed} sheet failed
-                </Link>
-              )}
-            </p>
-          )}
-          {message && <p className="mt-0.5 text-xs text-emerald-800">{message}</p>}
-        </div>
-        <button
-          type="button"
-          onClick={() => runSyncAll(false)}
-          disabled={syncing || !isOnline}
-          className="shrink-0 rounded-lg bg-[#0B4A8C] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#083A6E] disabled:opacity-50"
-        >
-          {syncing ? `Syncing… ${counts.total} left` : "Sync All"}
-        </button>
-      </div>
+          ) : null}
+          {errorMessage && remaining > 0 && !syncing ? (
+            <p className="mt-2 text-xs font-medium text-red-800">{errorMessage}</p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

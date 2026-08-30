@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
     const succeeded = results.filter((r) => r.ok).length;
     const failed = results.filter((r) => !r.ok).length;
     const counts = await getSheetsSyncCounts(db, userId);
+    const hasMore = counts.total > 0;
 
     return NextResponse.json({
       ok: failed === 0 && counts.total === 0,
@@ -21,6 +22,8 @@ export async function POST(request: NextRequest) {
       failed,
       results,
       counts,
+      hasMore,
+      balancesRecalculated: false,
     });
   } catch (error) {
     console.error("[Sheets] sync-all error:", error);

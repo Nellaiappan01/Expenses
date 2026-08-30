@@ -16,6 +16,40 @@ export function toLocalDateString(d: Date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Numeric form display: 30-08-2026 from YYYY-MM-DD */
+export function formatIsoDateDdMmYyyy(isoDate: string): string {
+  const trimmed = isoDate.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return "";
+  const [y, m, d] = trimmed.split("-");
+  return `${d}-${m}-${y}`;
+}
+
+/** Parse DD-MM-YYYY (also accepts / or .) to YYYY-MM-DD */
+export function parseDdMmYyyyToIsoDate(display: string): string | null {
+  const trimmed = display.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1000) return null;
+
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+
+  return toLocalDateString(d);
+}
+
+/** Auto-insert dashes while typing DD-MM-YYYY */
+export function maskDdMmYyyyInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+}
+
 export function addLocalDays(d: Date, deltaDays: number): Date {
   const copy = new Date(d);
   copy.setDate(copy.getDate() + deltaDays);
@@ -110,6 +144,14 @@ export function formatDayMonthName(date: Date | string): string {
 /** e.g. 16 Jun 2026 (Excel / report export) */
 export function formatDayMonthYear(date: Date | string): string {
   return formatDateDisplay(date, { weekday: false });
+}
+
+/** Google Drive date folder — matches Drive UI e.g. 01 Aug 2026 */
+export function formatDriveDateFolderName(date: Date | string): string {
+  const d = parseLocalDate(date);
+  if (!d) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${day} ${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /** Inclusive calendar days between two YYYY-MM-DD values. */

@@ -19,7 +19,7 @@ type PaymentEntry = Entry & { businessName?: string; payee?: ExpensePerson };
 
 const PAYMENT_METHODS: PaymentVerifiedMethod[] = ["Cash", "GPay / UPI", "Bank Transfer"];
 const DEFAULT_GPAY_NOTE = "Paid GPay";
-const BULK_SAVE_CHUNK = 6;
+const BULK_SAVE_CHUNK = 50;
 
 type BulkProgress = {
   phase: "saving" | "sheet";
@@ -27,10 +27,6 @@ type BulkProgress = {
   total: number;
   failed: number;
 };
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export default function PaymentManagement({ dashboard = false }: { dashboard?: boolean }) {
   const [filter, setFilter] = useState<PaymentFilter>("payment_pending");
@@ -60,9 +56,11 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
   const [paymentNote, setPaymentNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [requestedBy, setRequestedBy] = useState("");
+  const [category, setCategory] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [requestedByNames, setRequestedByNames] = useState<string[]>([]);
+  const [categoryNames, setCategoryNames] = useState<string[]>([]);
   const [pendingTotal, setPendingTotal] = useState({ count: 0, amount: 0 });
   const [paidTotal, setPaidTotal] = useState({ count: 0, amount: 0 });
   const [approvalTotal, setApprovalTotal] = useState({ count: 0, amount: 0 });
@@ -73,6 +71,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
+  const [copiedKey, setCopiedKey] = useState("");
   const [saveElapsed, setSaveElapsed] = useState(0);
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
 
@@ -83,6 +82,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
       const params = new URLSearchParams({ filter });
       if (businessId) params.set("businessId", businessId);
       if (requestedBy) params.set("requestedBy", requestedBy);
+      if (category) params.set("category", category);
       if (fromDate) params.set("from", fromDate);
       if (toDate) params.set("to", toDate);
       const res = await apiFetch(`/api/admin/payments?${params}`);
@@ -92,6 +92,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
       setEntries(nextEntries);
       setUsers(data.users ?? []);
       setRequestedByNames(data.requestedByNames ?? []);
+      setCategoryNames(data.categoryNames ?? []);
       if (data.pendingTotal) setPendingTotal(data.pendingTotal);
       else setPendingTotal({ count: 0, amount: 0 });
       if (data.paidTotal) setPaidTotal(data.paidTotal);
@@ -109,17 +110,47 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
         )
         .map((entry) => entry._id)
         .filter((id): id is string => Boolean(id));
-      setSelectedIds(requestedBy ? pendingIds : []);
+      setSelectedIds(
+        filter === "payment_pending" && (businessId || requestedBy) ? pendingIds : []
+      );
     } catch {
       setError("Could not load payment list");
     } finally {
       setLoading(false);
     }
-  }, [filter, businessId, requestedBy, fromDate, toDate]);
+  }, [filter, businessId, requestedBy, category, fromDate, toDate]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!businessId) {
+      setRequestedBy("");
+      setCategory("");
+    }
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId || !requestedBy) return;
+    if (!requestedByNames.includes(requestedBy)) {
+      setRequestedBy("");
+    }
+  }, [businessId, requestedByNames, requestedBy]);
+
+  useEffect(() => {
+    if (!businessId || !category) return;
+    if (requestedBy && !requestedByNames.includes(requestedBy)) {
+      setRequestedBy("");
+    }
+  }, [businessId, category, requestedByNames, requestedBy]);
+
+  useEffect(() => {
+    if (!businessId || !requestedBy) return;
+    if (category && !categoryNames.includes(category)) {
+      setCategory("");
+    }
+  }, [businessId, requestedBy, categoryNames, category]);
 
   useEffect(() => {
     if (!success) return;
@@ -129,7 +160,10 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
   useEffect(() => {
     if (!copyMsg) return;
-    const t = setTimeout(() => setCopyMsg(""), 2000);
+    const t = setTimeout(() => {
+      setCopyMsg("");
+      setCopiedKey("");
+    }, 1600);
     return () => clearTimeout(t);
   }, [copyMsg]);
 
@@ -159,6 +193,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     setPaymentNote("");
     setError("");
     setCopyMsg("");
+    setCopiedKey("");
   }
 
   function openEdit(entry: PaymentEntry) {
@@ -237,11 +272,13 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     }
   }
 
-  async function copyText(text: string, label: string) {
+  async function copyText(text: string, label: string, key: string) {
     try {
       await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
       setCopyMsg(`${label} copied`);
     } catch {
+      setCopiedKey("");
       setCopyMsg("Could not copy");
     }
   }
@@ -299,8 +336,16 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
   async function handleBulkPay() {
     if (saving) return;
-    if (!requestedBy && selectedIds.length === 0) {
-      setError("Select a Requested by person, or tick the pending entries to pay");
+    if (!requestedBy && selectedIds.length === 0 && !businessId) {
+      setError("Select a site, a person, or tick the pending entries to pay");
+      return;
+    }
+    const idsToPay =
+      selectedIds.length > 0
+        ? [...selectedIds]
+        : payableIds;
+    if (idsToPay.length === 0) {
+      setError("No pending payments selected");
       return;
     }
     if (!paymentDate) {
@@ -318,7 +363,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
     }
     setSaving(true);
     setError("");
-    const ids = [...selectedIds];
+    const ids = idsToPay;
     const total = ids.length;
     setBulkProgress({ phase: "saving", done: 0, total, failed: 0 });
     try {
@@ -333,6 +378,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             requestedBy: requestedBy || undefined,
+            category: category || undefined,
             from: fromDate || undefined,
             to: toDate || undefined,
             businessId: businessId || undefined,
@@ -368,35 +414,32 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
       setBulkProgress({ phase: "sheet", done: 0, total: paidIds.length, failed: 0 });
       if (paidIds.length > 0) {
-        await apiFetch("/api/admin/payments/sync-sheets", {
+        const syncRes = await apiFetch("/api/admin/payments/sync-sheets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids: paidIds }),
         });
-
-        const deadline = Date.now() + 90_000;
-        while (Date.now() < deadline) {
-          const progressRes = await apiFetch(
-            `/api/admin/payments/sync-progress?ids=${paidIds.join(",")}`
+        const syncData = await readApiJson<{ synced?: number; failed?: number; errors?: string[] }>(
+          syncRes
+        );
+        const sheetFailed = syncData.failed ?? 0;
+        setBulkProgress({
+          phase: "sheet",
+          done: syncData.synced ?? paidIds.length,
+          total: paidIds.length,
+          failed: sheetFailed,
+        });
+        if (!syncRes.ok || sheetFailed > 0) {
+          setError(
+            syncData.errors?.[0] ||
+              `Paid in app but ${sheetFailed} sheet row(s) need admin retry. Users do not need to tap Sync All.`
           );
-          const progress = await readApiJson<{
-            total?: number;
-            synced?: number;
-            failed?: number;
-            done?: number;
-          }>(progressRes);
-          const synced = progress.synced ?? progress.done ?? 0;
-          const failed = progress.failed ?? 0;
-          const sheetTotal = progress.total || paidIds.length;
-          setBulkProgress({ phase: "sheet", done: synced, total: sheetTotal, failed });
-          if (synced + failed >= sheetTotal) break;
-          await sleep(1500);
         }
       }
 
       notifyLedgerDataChanged();
       setSuccess(
-        `Saved ${paidCount} of ${total} in app — ₹${paidAmount.toLocaleString("en-IN")}. Sheet is updating.`
+        `Marked ${paidCount} as paid — ₹${paidAmount.toLocaleString("en-IN")}. Google Sheet updated by admin — users do not need to sync again.`
       );
       setShowBulk(false);
       setPaymentReference("");
@@ -420,6 +463,23 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
   const shellClass = dashboard
     ? "space-y-4"
     : "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900";
+
+  const payableEntries = entries.filter(
+    (entry) =>
+      entry.paymentStatus !== "paid" &&
+      (entry.approvalStatus === "approved" || Boolean(entry.approvedBy?.trim()))
+  );
+  const payableIds = payableEntries
+    .map((entry) => entry._id)
+    .filter((id): id is string => Boolean(id));
+
+  function selectAllPayable() {
+    setSelectedIds(payableIds);
+  }
+
+  function clearPayableSelection() {
+    setSelectedIds([]);
+  }
 
   const verifyAmount = verifyEntry ? Math.abs(verifyEntry.amount) : 0;
   const selectedPendingAmount = entries
@@ -457,7 +517,8 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           ? `Until ${formatDateDDMMYYYY(toDate)}`
           : "All dates";
   const peopleLabel = requestedBy || "All people";
-  const accountLabel = users.find((u) => u.userId === businessId)?.name || "All accounts";
+  const categoryLabel = category || "All categories";
+  const accountLabel = users.find((u) => u.userId === businessId)?.name || "All sites";
 
   return (
     <div className={shellClass}>
@@ -529,62 +590,95 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
         ))}
       </div>
 
-      <div className="mb-3">
-        <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-          Account (optional)
+      <div className="mb-3 rounded-2xl border border-[#D6E6F5] bg-[#F8FBFE] p-3">
+        <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#5A7FA5]">
+          Site account
         </label>
         <select
           value={businessId}
-          onChange={(e) => setBusinessId(e.target.value)}
-          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          onChange={(e) => {
+            setBusinessId(e.target.value);
+            setRequestedBy("");
+            setCategory("");
+          }}
+          className="w-full rounded-xl border border-[#D6E6F5] bg-white px-3 py-2.5 text-sm text-[#0B4A8C] outline-none focus:border-[#0B4A8C]"
         >
-          <option value="">All accounts</option>
+          <option value="">All sites</option>
           {users.map((u) => (
             <option key={u.userId} value={u.userId}>
               {u.name}
             </option>
           ))}
-          </select>
-        </div>
+        </select>
 
-        <div className="mb-3">
-          <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-            Requested by <span className="font-normal text-zinc-400">(needed for bulk pay)</span>
-          </label>
-          <select
-            value={requestedBy}
-            onChange={(e) => setRequestedBy(e.target.value)}
-            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-          >
-            <option value="">All people</option>
-            {requestedByNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="mb-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-600">From date</label>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#5A7FA5]">
+              Requested by
+            </label>
+            <select
+              value={requestedBy}
+              onChange={(e) => setRequestedBy(e.target.value)}
+              disabled={!businessId}
+              className="w-full rounded-xl border border-[#D6E6F5] bg-white px-3 py-2.5 text-sm text-[#0B4A8C] outline-none focus:border-[#0B4A8C] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            >
+              <option value="">
+                {businessId ? "All people" : "Select site account first"}
+              </option>
+              {requestedByNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#5A7FA5]">
+              Category
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              disabled={!businessId}
+              className="w-full rounded-xl border border-[#D6E6F5] bg-white px-3 py-2.5 text-sm text-[#0B4A8C] outline-none focus:border-[#0B4A8C] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            >
+              <option value="">
+                {businessId ? "All categories" : "Select site account first"}
+              </option>
+              {categoryNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#5A7FA5]">
+              From date
+            </label>
             <input
               type="date"
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
-              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm"
+              className="w-full rounded-xl border border-[#D6E6F5] bg-white px-3 py-2.5 text-sm text-[#0B4A8C]"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-600">To date</label>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#5A7FA5]">
+              To date
+            </label>
             <input
               type="date"
               value={toDate}
               onChange={(e) => setToDate(e.target.value)}
-              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm"
+              className="w-full rounded-xl border border-[#D6E6F5] bg-white px-3 py-2.5 text-sm text-[#0B4A8C]"
             />
           </div>
         </div>
+      </div>
 
         <div className="mb-3 rounded-2xl bg-[#0B4A8C] px-4 py-3 text-white shadow-sm">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-100">
@@ -596,28 +690,66 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           <p className="mt-1 text-[11px] leading-snug text-sky-100">
             {filteredTotal.count} {filteredTotal.count === 1 ? "entry" : "entries"} · {rangeLabel}
             {" · "}
-            {peopleLabel}
+            {peopleLabel} · {categoryLabel}
             {businessId ? ` · ${accountLabel}` : ""}
           </p>
         </div>
 
-        {requestedBy && pendingTotal.count > 0 && filter !== "paid" ? (
-          <div className="mb-3 rounded-2xl border border-yellow-200 bg-yellow-50 px-3 py-3">
-            <p className="text-sm font-semibold text-yellow-950">
-              {requestedBy} · {pendingTotal.count} pending · ₹
+        {filter === "payment_pending" && pendingTotal.count > 0 && (businessId || requestedBy) ? (
+          <div className="mb-3 rounded-2xl border border-[#E8D48A] bg-gradient-to-b from-[#FFFBEB] to-[#FEF9E7] p-3 shadow-sm">
+            <p className="text-sm font-bold text-[#5C4A0A]">
+              {requestedBy || accountLabel} · {pendingTotal.count} to pay · ₹
               {pendingTotal.amount.toLocaleString("en-IN")}
             </p>
-            <p className="mt-0.5 text-[11px] text-yellow-800">
+            <p className="mt-0.5 text-[11px] text-[#8A7428]">
+              {selectedIds.length > 0
+                ? `${selectedIds.length} selected for bulk pay`
+                : "Tick entries below or use Select all"}
               {fromDate || toDate
-                ? `Dates ${fromDate || "…"} to ${toDate || "…"}`
-                : "All dates for this person"}
+                ? ` · Dates ${fromDate || "…"} to ${toDate || "…"}`
+                : ""}
             </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={selectAllPayable}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-[#D4C078] bg-white px-3 py-2.5 text-xs font-semibold text-[#5C4A0A] shadow-sm active:scale-[0.98]"
+              >
+                <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+                  />
+                </svg>
+                Select all ({payableIds.length})
+              </button>
+              {selectedIds.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={clearPayableSelection}
+                  className="flex items-center justify-center gap-1 rounded-xl border border-[#D4C078] bg-white px-3 py-2.5 text-xs font-semibold text-[#5C4A0A] shadow-sm active:scale-[0.98]"
+                  aria-label="Clear selection"
+                >
+                  <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                  Clear
+                </button>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => {
                 setFilter("payment_pending");
-                setPaymentMethod("Cash");
-                setPaymentPaidTo(requestedBy);
+                setPaymentMethod(requestedBy ? "Cash" : "Bank Transfer");
+                setPaymentPaidTo(requestedBy || "");
                 setPaymentDate(new Date().toISOString().split("T")[0]);
                 setPaymentReference("");
                 setPaymentNote("");
@@ -625,42 +757,20 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                 setVerifyEntry(null);
                 setEditEntry(null);
               }}
-              className="mt-2 w-full rounded-xl bg-[#0B4A8C] py-2.5 text-sm font-bold text-white"
+              disabled={selectedIds.length === 0 && !requestedBy}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4A8C] py-3 text-sm font-bold text-white shadow-md disabled:opacity-50 active:scale-[0.99]"
             >
+              <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
               Mark {selectedIds.length || pendingTotal.count} as paid
             </button>
           </div>
-        ) : filter === "paid" && requestedBy && fromDate && toDate && paidTotal.count > 0 ? (
-          <div className="mb-3 rounded-2xl border border-green-200 bg-green-50 px-3 py-3">
-            <p className="text-sm font-semibold text-green-950">
-              {requestedBy} · {paidTotal.count} paid · ₹
-              {paidTotal.amount.toLocaleString("en-IN")}
-            </p>
-            <p className="mt-0.5 text-[11px] text-green-800">
-              {formatDateDDMMYYYY(fromDate)} to {formatDateDDMMYYYY(toDate)}
-            </p>
-          </div>
-        ) : filter === "paid" && requestedBy && paidTotal.count > 0 ? (
-          <div className="mb-3 rounded-2xl border border-green-200 bg-green-50 px-3 py-3">
-            <p className="text-sm font-semibold text-green-950">
-              {requestedBy} · {paidTotal.count} paid · ₹
-              {paidTotal.amount.toLocaleString("en-IN")}
-            </p>
-            <p className="mt-0.5 text-[11px] text-green-800">
-              {fromDate || toDate
-                ? `${fromDate ? formatDateDDMMYYYY(fromDate) : "…"} to ${toDate ? formatDateDDMMYYYY(toDate) : "…"}`
-                : "All dates — pick from and to for a period total"}
-            </p>
-          </div>
-        ) : filter === "paid" && !requestedBy ? (
-          <p className="mb-3 rounded-xl border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-600">
-            Pick Requested by and from/to dates to see that person&apos;s paid total for the period.
-          </p>
-        ) : filter === "payment_pending" ? (
-          <p className="mb-3 rounded-xl border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-600">
-            Pick a name in Requested by. Then this box shows that person&apos;s pending count and
-            amount for bulk pay. Account can stay All accounts.
-          </p>
         ) : null}
 
       {error && !verifyEntry && !showBulk && (
@@ -699,7 +809,9 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                 }}
               >
                 <span className="flex min-w-0 items-start gap-2">
-                  {requestedBy && e.paymentStatus !== "paid" && (e.approvalStatus === "approved" || Boolean(e.approvedBy?.trim())) ? (
+                  {filter === "payment_pending" &&
+                  e.paymentStatus !== "paid" &&
+                  (e.approvalStatus === "approved" || Boolean(e.approvedBy?.trim())) ? (
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4 accent-[#0B4A8C]"
@@ -715,7 +827,9 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                     <p className="mt-0.5 text-xs text-zinc-500">
                       {e.name}
                       {e.payee?.preferredMethod === "cash" ? " · Cash" : ""}
-                      {e.payee?.preferredMethod === "gpay" && e.payee.upiId ? " · GPay" : ""}
+                      {e.payee?.preferredMethod === "gpay" && (e.payee.upiId || e.payee.mobile)
+                        ? " · GPay"
+                        : ""}
                       {e.payee?.preferredMethod === "bank" ? " · Bank" : ""}
                     </p>
                   </span>
@@ -933,14 +1047,75 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                   <strong>{formatDateDDMMYYYY(verifyEntry.paymentDueDate)}</strong>
                 </p>
               )}
+              {payee?.mobile ? (
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <p>
+                    Mobile: <strong className="tabular-nums">{payee.mobile}</strong>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      choosePaymentMethod("GPay / UPI");
+                      void copyText(payee.mobile!, "Mobile number", "mobile");
+                    }}
+                    className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-bold text-white transition-colors active:scale-90 ${
+                      copiedKey === "mobile" ? "copy-pop bg-emerald-700" : "bg-emerald-600"
+                    }`}
+                  >
+                    {copiedKey === "mobile" ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              ) : null}
             </div>
 
-            {payee && (upiUrl || bankDetails || payee.preferredMethod === "cash") && (
+            {payee && (upiUrl || bankDetails || payee.preferredMethod === "cash" || payee.mobile) && (
               <div className="mt-3 space-y-2 rounded-xl border border-[#D6E6F5] bg-white p-3">
                 <p className="text-xs font-bold uppercase tracking-wide text-[#7A9BB8]">
                   Quick pay — {payee.name}
                 </p>
 
+                {payee.mobile && (payee.preferredMethod === "gpay" || paymentMethod === "GPay / UPI") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      choosePaymentMethod("GPay / UPI");
+                      void copyText(payee.mobile!, "Mobile number", "mobile-gpay");
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-semibold active:scale-95 ${
+                      copiedKey === "mobile-gpay"
+                        ? "copy-pop border-emerald-600 bg-emerald-600 text-white"
+                        : "border-emerald-500 bg-emerald-50 text-emerald-800"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-9 w-9 items-center justify-center rounded-full ${
+                        copiedKey === "mobile-gpay" ? "bg-white text-emerald-700" : "bg-white text-emerald-700"
+                      }`}
+                    >
+                      {copiedKey === "mobile-gpay" ? (
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block">
+                        {copiedKey === "mobile-gpay" ? "Copied" : "Copy mobile for GPay"}
+                      </span>
+                      <span
+                        className={`block truncate text-xs font-normal tabular-nums ${
+                          copiedKey === "mobile-gpay" ? "text-white/80" : "text-[#5A7FA5]"
+                        }`}
+                      >
+                        {payee.mobile} · ₹{verifyAmount.toLocaleString("en-IN")}
+                      </span>
+                    </span>
+                  </button>
+                )}
                 {upiUrl && (
                   <>
                     <a
@@ -958,24 +1133,6 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                         </span>
                       </span>
                     </a>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        choosePaymentMethod("GPay / UPI");
-                        void copyText(
-                          `${payee.upiId}  ₹${verifyAmount.toFixed(2)}`,
-                          "UPI ID and amount"
-                        );
-                      }}
-                      className="w-full rounded-lg border border-[#D6E6F5] px-3 py-2 text-left text-xs font-medium text-[#0B4A8C]"
-                    >
-                      Copy UPI ID &amp; amount — pay from GPay chat if intent fails
-                    </button>
-                    <p className="text-[11px] leading-snug text-[#5A7FA5]">
-                      If GPay shows a bank limit error, pay that person inside GPay chat, then type a
-                      short note below (example: Paid GPay). GPay does not let you copy a transaction
-                      ID. Returning from GPay does not mark this as paid.
-                    </p>
                   </>
                 )}
 
@@ -984,9 +1141,13 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                     type="button"
                     onClick={() => {
                       setPaymentMethod("Bank Transfer");
-                      void copyText(bankDetails, "Bank details");
+                      void copyText(bankDetails, "Bank details", "bank");
                     }}
-                    className="flex w-full items-center gap-3 rounded-xl border border-[#0B4A8C] bg-[#EEF5FC] px-3 py-3 text-left text-sm font-semibold text-[#0B4A8C] active:scale-[0.99]"
+                    className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-semibold active:scale-95 ${
+                      copiedKey === "bank"
+                        ? "copy-pop border-emerald-600 bg-emerald-600 text-white"
+                        : "border-[#0B4A8C] bg-[#EEF5FC] text-[#0B4A8C]"
+                    }`}
                   >
                     <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white">
                       <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -994,7 +1155,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                       </svg>
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block">Copy bank details</span>
+                      <span className="block">{copiedKey === "bank" ? "Copied" : "Copy bank details"}</span>
                       <span className="block truncate text-xs font-normal text-[#5A7FA5]">
                         {payee.bankAccount}
                         {payee.ifsc ? ` · ${payee.ifsc}` : ""}
@@ -1030,7 +1191,7 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
 
             {!payee && (
               <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                No payment details saved for {verifyEntry.name}. Add UPI / bank in Defaults →
+                No payment details saved for {verifyEntry.name}. Add mobile / UPI / bank in Defaults →
                 Requested by.
               </p>
             )}
@@ -1094,9 +1255,6 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                   autoComplete="off"
                   className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
                 />
-                <p className="mt-1 text-[11px] text-zinc-500">
-                  GPay has no copy ID. Type any short note, like Paid GPay.
-                </p>
               </div>
             ) : (
               <div className="mt-3">
@@ -1151,7 +1309,9 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           <div className="fixed inset-x-0 bottom-0 z-[71] max-h-[88dvh] overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl sm:inset-x-4 sm:bottom-auto sm:top-8 sm:mx-auto sm:max-h-[85vh] sm:max-w-md sm:rounded-2xl">
             <h3 className="text-base font-bold text-zinc-900">Bulk mark as paid</h3>
             <div className="mt-2 rounded-lg bg-[#F4F8FC] p-3 text-sm text-[#0B4A8C]">
-              <p className="font-semibold">{requestedBy || "Selected entries"}</p>
+              <p className="font-semibold">
+                {requestedBy || (businessId ? accountLabel : "Selected entries")}
+              </p>
               <p>
                 {selectedIds.length} pending · ₹{selectedPendingAmount.toLocaleString("en-IN")}
               </p>
@@ -1218,11 +1378,6 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
                   autoComplete="off"
                   className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
                 />
-                {paymentMethod === "GPay / UPI" ? (
-                  <p className="mt-1 text-[11px] text-zinc-500">
-                    GPay has no copy ID. Type a short note such as Paid GPay.
-                  </p>
-                ) : null}
                 {paymentMethod === "Bank Transfer" &&
                 paymentReference.trim() &&
                 !upiReferenceCheck.ok ? (

@@ -5,10 +5,12 @@ export type EntryListItem = {
   amount: number;
   deleted?: boolean;
   isEdited?: boolean;
+  isNil?: boolean;
 };
 
 /** Signed display amount with type-aware prefix. */
-export function formatEntryAmount(amount: number, type: EntryType): string {
+export function formatEntryAmount(amount: number, type: EntryType, isNil?: boolean): string {
+  if (isNil) return "Nil";
   const formatted = Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
   if (type === "rotation_cash") {
@@ -25,6 +27,7 @@ export function formatEntryAmount(amount: number, type: EntryType): string {
 
 export function entryAmountColorClass(entry: EntryListItem): string {
   if (entry.deleted) return "text-red-400 line-through";
+  if (entry.isNil) return "text-[#5A7FA5]";
 
   switch (entry.type) {
     case "rotation_cash":

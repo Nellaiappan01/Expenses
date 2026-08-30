@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
           approvalStatus: 1,
           paymentStatus: 1,
           approvedBy: 1,
+          isNil: 1,
         })
         .toArray(),
     ]);

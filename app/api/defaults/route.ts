@@ -12,6 +12,7 @@ import {
   sanitizeExpensePerson,
 } from "@/lib/expensePeople";
 import { sanitizeProfitabilityCategoryRules } from "@/lib/profitability";
+import { normalizeExpenseNotes, type ExpenseNoteDefault } from "@/lib/expenseNotes";
 import type { ExpensePerson } from "@/lib/types";
 
 export interface DefaultsDoc {
@@ -24,7 +25,7 @@ export interface DefaultsDoc {
   workerCategories?: string[];
   expenseCategories?: string[];
   expenseTags?: string[];
-  notes?: string[];
+  notes?: string[] | ExpenseNoteDefault[];
   banks?: string[];
   profitabilityCategoryRules?: Record<string, string>;
   updatedAt?: Date;
@@ -39,7 +40,7 @@ function starterDefaults() {
     workerCategories: mergeCategories([]),
     expenseCategories: mergeExpenseCategories([]),
     expenseTags: mergeExpenseTags([]),
-    notes: [] as string[],
+    notes: [] as ExpenseNoteDefault[],
     banks: [] as string[],
   };
 }
@@ -54,7 +55,7 @@ function rawFromDoc(doc: DefaultsDoc) {
     workerCategories: doc.workerCategories ?? [],
     expenseCategories: doc.expenseCategories ?? [],
     expenseTags: doc.expenseTags ?? [],
-    notes: doc.notes ?? [],
+    notes: normalizeExpenseNotes(doc.notes),
     banks: doc.banks ?? [],
     profitabilityCategoryRules: sanitizeProfitabilityCategoryRules(
       doc.profitabilityCategoryRules
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
       workerCategories: Array.isArray(workerCategories) ? workerCategories : [],
       expenseCategories: Array.isArray(expenseCategories) ? expenseCategories : [],
       expenseTags: Array.isArray(expenseTags) ? expenseTags : [],
-      notes: Array.isArray(notes) ? notes : [],
+      notes: normalizeExpenseNotes(notes),
       banks: Array.isArray(banks) ? banks : [],
       profitabilityCategoryRules: sanitizeProfitabilityCategoryRules(
         rawCategoryRules

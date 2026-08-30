@@ -27,7 +27,9 @@ export type UserBranding = {
 export type UserIntegrations = {
   googleSheetUrl: string;
   appsScriptWebhookUrl: string;
+  googleDriveFolderUrl?: string;
   hasAppsScriptWebhook?: boolean;
+  hasGoogleDriveFolder?: boolean;
 };
 
 type ConfigContextType = {
@@ -75,9 +77,7 @@ function writeConfigCache(userId: string, config: ConfigContextType["config"]) {
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   const { userId } = useUser();
-  const [config, setConfig] = useState<ConfigContextType["config"]>(() =>
-    userId ? readConfigCache(userId) : null
-  );
+  const [config, setConfig] = useState<ConfigContextType["config"]>(null);
 
   const refresh = useCallback(() => {
     apiFetch("/api/config")

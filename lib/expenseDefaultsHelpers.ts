@@ -1,6 +1,7 @@
 import type { Db } from "mongodb";
 import { mergeExpenseCategories, mergeExpenseTags } from "./entryCategories";
 import { sanitizeExpensePerson } from "./expensePeople";
+import { normalizeExpenseNotes } from "./expenseNotes";
 
 export async function ensureExpenseName(db: Db, businessId: string, name: string) {
   const trimmed = name.trim();
@@ -66,13 +67,12 @@ export async function ensureExpenseNote(db: Db, businessId: string, note: string
   if (!trimmed) return;
   const key = trimmed.toLowerCase();
   const doc = await db.collection("defaults").findOne({ businessId });
-  const existing = (doc?.notes as string[] | undefined) ?? [];
-  if (existing.some((n) => n.trim().toLowerCase() === key)) return;
+  const notes = normalizeExpenseNotes(doc?.notes);
+  if (notes.some((n) => n.label.toLowerCase() === key)) return;
   await db.collection("defaults").updateOne(
     { businessId },
     {
-      $set: { businessId },
-      $addToSet: { notes: trimmed },
+      $set: { businessId, notes: [...notes, { label: trimmed }] },
     },
     { upsert: true }
   );

@@ -28,21 +28,28 @@ export async function GET(request: NextRequest) {
       .limit(10)
       .toArray();
 
-    return NextResponse.json({
-      notifications: entries.map((e) => ({
+    const seenMessages = new Set<string>();
+    const notifications = [];
+    for (const e of entries) {
+      const message = `₹${Math.abs(e.amount as number).toLocaleString("en-IN")} for ${requestLabel({
+        name: e.name as string,
+        category: e.category as string | undefined,
+        note: e.note as string | undefined,
+      })} has been approved and paid.`;
+      if (seenMessages.has(message)) continue;
+      seenMessages.add(message);
+      notifications.push({
         entryId: e._id.toString(),
-        message: `₹${Math.abs(e.amount as number).toLocaleString("en-IN")} for ${requestLabel({
-          name: e.name as string,
-          category: e.category as string | undefined,
-          note: e.note as string | undefined,
-        })} has been approved and paid.`,
+        message,
         verifiedAt:
           e.paymentVerifiedAt instanceof Date
             ? e.paymentVerifiedAt.toISOString()
             : e.paymentVerifiedAt,
         entry: serializeEntry(e),
-      })),
-    });
+      });
+    }
+
+    return NextResponse.json({ notifications });
   } catch (error) {
     console.error("Payment notifications error:", error);
     return NextResponse.json({ notifications: [] });

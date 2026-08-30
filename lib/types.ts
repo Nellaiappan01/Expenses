@@ -10,6 +10,7 @@ export interface ExpensePerson {
   nameLower: string;
   preferredMethod?: ExpensePersonPreferredMethod;
   cashOk?: boolean;
+  mobile?: string;
   upiId?: string;
   bankAccount?: string;
   ifsc?: string;
@@ -48,6 +49,8 @@ export interface Entry {
   paymentNotificationHidden?: boolean;
   attachmentUrl?: string;
   attachmentPublicId?: string;
+  /** Google Drive file link written to sheet column N. */
+  attachmentDriveUrl?: string;
   tags?: string[];
   businessId: string;
   createdAt: Date;
@@ -62,6 +65,8 @@ export interface Entry {
   editedBy?: string;
   /** Capital / one-off — excluded from profitability expense totals. */
   excludeFromProfitability?: boolean;
+  /** No work / leave day for this category on this date. */
+  isNil?: boolean;
 }
 
 export interface EntryAuditLog {
@@ -91,6 +96,11 @@ export interface EntryInput {
   paymentDueDate?: string;
   attachmentUrl?: string;
   attachmentPublicId?: string;
+  attachmentDriveUrl?: string;
   tags?: string[];
   excludeFromProfitability?: boolean;
+  /** No work / leave day for this category on this date. Amount is always 0. */
+  isNil?: boolean;
+  /** Offline queue idempotency — prevents duplicate rows when Sync All retries upload. */
+  clientId?: string;
 }

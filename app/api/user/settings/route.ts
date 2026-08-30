@@ -3,6 +3,7 @@ import { getDb } from "@/lib/mongodb";
 import { getUserId } from "@/lib/user";
 import { isCloudinaryConfigured, uploadUserBanner } from "@/lib/cloudinary";
 import { getUserSettings, saveUserSettings, shortNameFromBusinessName } from "@/lib/userSettings";
+import { normalizeGoogleDriveFolderUrl, parseGoogleDriveFolderId } from "@/lib/googleDriveFolder";
 
 export async function GET(request: NextRequest) {
   try {
@@ -31,12 +32,14 @@ export async function PATCH(request: NextRequest) {
       bannerImageData,
       googleSheetUrl,
       appsScriptWebhookUrl,
+      googleDriveFolderUrl,
     } = body as {
       appName?: string;
       bannerUrl?: string;
       bannerImageData?: string;
       googleSheetUrl?: string;
       appsScriptWebhookUrl?: string;
+      googleDriveFolderUrl?: string;
     };
 
     const brandingPatch: {
@@ -66,6 +69,7 @@ export async function PATCH(request: NextRequest) {
     const integrationsPatch: {
       googleSheetUrl?: string;
       appsScriptWebhookUrl?: string;
+      googleDriveFolderUrl?: string;
     } = {};
 
     if (googleSheetUrl !== undefined) {
@@ -73,6 +77,16 @@ export async function PATCH(request: NextRequest) {
     }
     if (appsScriptWebhookUrl !== undefined) {
       integrationsPatch.appsScriptWebhookUrl = appsScriptWebhookUrl.trim();
+    }
+    if (googleDriveFolderUrl !== undefined) {
+      const trimmed = googleDriveFolderUrl.trim();
+      if (trimmed && !parseGoogleDriveFolderId(trimmed)) {
+        return NextResponse.json(
+          { error: "Paste a Google Drive folder URL (drive.google.com/.../folders/...)." },
+          { status: 400 }
+        );
+      }
+      integrationsPatch.googleDriveFolderUrl = trimmed ? normalizeGoogleDriveFolderUrl(trimmed) : "";
     }
 
     const settings = await saveUserSettings(db, userId, {

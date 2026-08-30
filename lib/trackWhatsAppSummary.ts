@@ -168,6 +168,7 @@ type WorkflowBucket = "pending_approval" | "payment_pending" | "paid";
 
 function expenseWorkflowBucket(entry: Entry): WorkflowBucket | null {
   if (entry.type !== "expense") return null;
+  if (entry.isNil) return null;
   if (entry.approvalStatus === "rejected") return null;
   if (isLegacyWorkflowEntry(entry)) return "paid";
   if (entry.paymentStatus === "paid") return "paid";
@@ -200,6 +201,48 @@ export function buildWorkflowTotals(entries: Entry[]): WorkflowTotals {
   }
 
   return totals;
+}
+
+/** Footer / share total for the selected Pending, To pay, or Paid tab — expenses only. */
+export function workflowSectionTotal(
+  workflowStatus: string,
+  totals: WorkflowTotals
+): { label: string; amount: number; count: number; tone: "gold" | "brand"; icon: "pending" | "pay" | "paid" } {
+  if (workflowStatus === "approval_pending") {
+    return {
+      label: "Pending total",
+      amount: totals.pendingApproval.amount,
+      count: totals.pendingApproval.count,
+      tone: "brand",
+      icon: "pending",
+    };
+  }
+  if (workflowStatus === "payment_pending") {
+    return {
+      label: "To pay total",
+      amount: totals.paymentPending.amount,
+      count: totals.paymentPending.count,
+      tone: "gold",
+      icon: "pay",
+    };
+  }
+  if (workflowStatus === "paid") {
+    return {
+      label: "Paid total",
+      amount: totals.paidVerified.amount,
+      count: totals.paidVerified.count,
+      tone: "brand",
+      icon: "paid",
+    };
+  }
+  return {
+    label: "Expense total",
+    amount:
+      totals.pendingApproval.amount + totals.paymentPending.amount + totals.paidVerified.amount,
+    count: totals.pendingApproval.count + totals.paymentPending.count + totals.paidVerified.count,
+    tone: "brand",
+    icon: "paid",
+  };
 }
 
 /** Merge requested-by names case-insensitively. */
@@ -240,21 +283,31 @@ function workflowLine(label: string, row: WorkflowBucketTotals): string {
 
 export function buildTrackSummaryStats(entries: Entry[]): TrackSummaryStats {
   const sorted = sortEntriesChronologically(entries);
-  const totalAmount = sorted.reduce((sum, e) => sum + Math.abs(e.amount), 0);
+  const workflowTotals = buildWorkflowTotals(sorted);
+  const totalAmount =
+    workflowTotals.pendingApproval.amount +
+    workflowTotals.paymentPending.amount +
+    workflowTotals.paidVerified.amount;
+  const totalEntries =
+    workflowTotals.pendingApproval.count +
+    workflowTotals.paymentPending.count +
+    workflowTotals.paidVerified.count;
 
   return {
     totalAmount,
-    totalEntries: sorted.length,
-    categoryBreakdown: groupCategories(sorted),
-    requestedByBreakdown: groupRequestedBy(sorted),
-    payments: sorted.map((e) => ({
-      date: formatPaymentDate(e.date),
-      requestedBy: e.name?.trim() || "Unknown",
-      category: e.category?.trim() || "Other",
-      amount: Math.abs(e.amount),
-      note: e.note?.trim() || undefined,
-    })),
-    workflowTotals: buildWorkflowTotals(sorted),
+    totalEntries,
+    categoryBreakdown: groupCategories(sorted.filter((e) => e.type === "expense")),
+    requestedByBreakdown: groupRequestedBy(sorted.filter((e) => e.type === "expense")),
+    payments: sorted
+      .filter((e) => e.type === "expense")
+      .map((e) => ({
+        date: formatPaymentDate(e.date),
+        requestedBy: e.name?.trim() || "Unknown",
+        category: e.category?.trim() || "Other",
+        amount: Math.abs(e.amount),
+        note: e.note?.trim() || undefined,
+      })),
+    workflowTotals,
   };
 }
 

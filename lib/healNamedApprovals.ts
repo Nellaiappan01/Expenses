@@ -8,9 +8,16 @@ export async function healNamedApprovals(db: Db, businessId?: string) {
   const filter: Record<string, unknown> = {
     type: "expense",
     deleted: { $ne: true },
-    approvalStatus: "pending",
     paymentStatus: { $ne: "paid" },
+    approvalStatus: { $ne: "rejected" },
     approvedBy: { $gt: "" },
+    $or: [
+      { approvalStatus: "pending" },
+      { approvalStatus: { $exists: false } },
+      { paymentStatus: { $exists: false } },
+      { paymentStatus: null },
+      { paymentStatus: "" },
+    ],
   };
   if (businessId) filter.businessId = businessId;
   await db.collection("entries").updateMany(filter, {

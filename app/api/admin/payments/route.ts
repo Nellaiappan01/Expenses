@@ -2,17 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminAuth";
 import { NOT_DELETED_MATCH } from "@/lib/entryAudit";
 import { serializeEntry } from "@/lib/entrySerialize";
-import { findExpensePerson, normalizeExpensePeople } from "@/lib/expensePeople";
+import { expenseNamesFromPeople, findExpensePerson, normalizeExpensePeople } from "@/lib/expensePeople";
 import { healNamedApprovals } from "@/lib/healNamedApprovals";
 import { getDb } from "@/lib/mongodb";
 import { AWAITING_APPROVER_MATCH, AWAITING_PAYMENT_MATCH } from "@/lib/paymentWorkflow";
 
 function applyScope(
   match: Record<string, unknown>,
-  scope: { businessId?: string; requestedBy?: string; from?: string; to?: string }
+  scope: {
+    businessId?: string;
+    requestedBy?: string;
+    category?: string;
+    from?: string;
+    to?: string;
+  }
 ) {
   if (scope.businessId) match.businessId = scope.businessId;
   if (scope.requestedBy) match.nameLower = scope.requestedBy.toLowerCase();
+  if (scope.category) {
+    const escaped = scope.category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    match.category = { $regex: `^${escaped}$`, $options: "i" };
+  }
   if (scope.from || scope.to) {
     const dateMatch: Record<string, string> = {};
     if (scope.from) dateMatch.$gte = scope.from;
@@ -20,6 +30,43 @@ function applyScope(
     match.date = dateMatch;
   }
   return match;
+}
+
+async function distinctEntryValues(
+  db: Awaited<ReturnType<typeof getDb>>,
+  businessId: string,
+  field: "name" | "category",
+  filters?: { category?: string; requestedBy?: string }
+): Promise<string[]> {
+  const match: Record<string, unknown> = {
+    type: "expense",
+    ...NOT_DELETED_MATCH,
+    businessId,
+  };
+  if (filters?.category) {
+    const escaped = filters.category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    match.category = { $regex: `^${escaped}$`, $options: "i" };
+  }
+  if (filters?.requestedBy) {
+    match.nameLower = filters.requestedBy.toLowerCase();
+  }
+
+  const fieldKey = field === "name" ? "name" : "category";
+  const rows = await db
+    .collection("entries")
+    .aggregate<{ value: string }>([
+      { $match: { ...match, [fieldKey]: { $exists: true, $nin: ["", null] } } },
+      {
+        $group: {
+          _id: field === "name" ? "$nameLower" : { $toLower: `$${fieldKey}` },
+          value: { $first: `$${fieldKey}` },
+        },
+      },
+      { $sort: { value: 1 } },
+    ])
+    .toArray();
+
+  return rows.map((row) => String(row.value).trim()).filter(Boolean);
 }
 
 async function sumAmount(db: Awaited<ReturnType<typeof getDb>>, match: Record<string, unknown>) {
@@ -54,6 +101,7 @@ export async function GET(request: NextRequest) {
     const scope = {
       businessId: searchParams.get("businessId")?.trim() || undefined,
       requestedBy: searchParams.get("requestedBy")?.trim() || undefined,
+      category: searchParams.get("category")?.trim() || undefined,
       from: searchParams.get("from")?.trim() || undefined,
       to: searchParams.get("to")?.trim() || undefined,
     };
@@ -98,21 +146,12 @@ export async function GET(request: NextRequest) {
       .limit(200)
       .toArray();
 
-    const [approvalTotal, pendingTotal, paidTotal, filteredTotal, requestedByRows] =
-      await Promise.all([
-        sumAmount(db, approvalMatch),
-        sumAmount(db, paymentMatch),
-        sumAmount(db, paidMatch),
-        sumAmount(db, listMatch),
-        db
-          .collection("entries")
-          .aggregate<{ name: string }>([
-            { $match: { type: "expense", ...NOT_DELETED_MATCH } },
-            { $group: { _id: "$nameLower", name: { $first: "$name" } } },
-            { $sort: { name: 1 } },
-          ])
-          .toArray(),
-      ]);
+    const [approvalTotal, pendingTotal, paidTotal, filteredTotal] = await Promise.all([
+      sumAmount(db, approvalMatch),
+      sumAmount(db, paymentMatch),
+      sumAmount(db, paidMatch),
+      sumAmount(db, listMatch),
+    ]);
 
     const users = await db
       .collection("users")
@@ -124,10 +163,9 @@ export async function GET(request: NextRequest) {
       users.map((u) => [u.userId, u.name || u.username || u.userId])
     );
 
-    const businessIds = [...new Set(entries.map((e) => e.businessId as string))];
     const defaultsDocs = await db
       .collection("defaults")
-      .find({ businessId: { $in: businessIds } })
+      .find(scope.businessId ? { businessId: scope.businessId } : {})
       .toArray();
     const peopleByBusiness = Object.fromEntries(
       defaultsDocs.map((doc) => [
@@ -135,6 +173,59 @@ export async function GET(request: NextRequest) {
         normalizeExpensePeople(doc as Parameters<typeof normalizeExpensePeople>[0]),
       ])
     );
+
+    let requestedByNames: string[] = [];
+    let categoryNames: string[] = [];
+
+    if (scope.businessId) {
+      const doc = defaultsDocs.find((d) => d.businessId === scope.businessId);
+      const defaultPeople = expenseNamesFromPeople(peopleByBusiness[scope.businessId] ?? []);
+      const defaultCategories = new Set<string>();
+      for (const cat of (doc?.expenseCategories as string[] | undefined) ?? []) {
+        const trimmed = String(cat).trim();
+        if (trimmed) defaultCategories.add(trimmed);
+      }
+
+      const [namesFromEntries, categoriesFromEntries] = await Promise.all([
+        distinctEntryValues(db, scope.businessId, "name", {
+          category: scope.category,
+          requestedBy: scope.requestedBy,
+        }),
+        distinctEntryValues(db, scope.businessId, "category", {
+          category: scope.category,
+          requestedBy: scope.requestedBy,
+        }),
+      ]);
+
+      if (scope.category) {
+        requestedByNames = namesFromEntries;
+      } else if (scope.requestedBy) {
+        requestedByNames = defaultPeople.filter(
+          (name) => name.toLowerCase() === scope.requestedBy!.toLowerCase()
+        );
+      } else {
+        requestedByNames = defaultPeople;
+      }
+
+      if (scope.requestedBy) {
+        const defaultByLower = new Map(
+          [...defaultCategories].map((cat) => [cat.toLowerCase(), cat] as const)
+        );
+        categoryNames = categoriesFromEntries
+          .map((cat) => defaultByLower.get(cat.toLowerCase()) ?? cat)
+          .filter((cat, index, list) => list.indexOf(cat) === index)
+          .sort((a, b) => a.localeCompare(b));
+      } else if (scope.category) {
+        categoryNames = [...defaultCategories].filter(
+          (cat) => cat.toLowerCase() === scope.category!.toLowerCase()
+        );
+        if (categoryNames.length === 0) {
+          categoryNames = [scope.category];
+        }
+      } else {
+        categoryNames = [...defaultCategories].sort((a, b) => a.localeCompare(b));
+      }
+    }
 
     return NextResponse.json({
       entries: entries.map((e) => {
@@ -150,7 +241,8 @@ export async function GET(request: NextRequest) {
         userId: u.userId,
         name: u.name || u.username || u.userId,
       })),
-      requestedByNames: requestedByRows.map((row) => row.name).filter(Boolean),
+      requestedByNames,
+      categoryNames,
       pendingTotal,
       paidTotal,
       approvalTotal,

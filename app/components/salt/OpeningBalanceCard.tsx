@@ -158,7 +158,7 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
   return (
     <div className="space-y-2">
       <div
-        className={`salt-balance-card relative overflow-hidden rounded-[1.25rem] bg-gradient-to-br from-[#0B4A8C] to-[#062f5c] px-3.5 py-3 text-white shadow-[0_12px_40px_rgba(11,74,140,0.35)] transition-all duration-300 ${
+        className={`salt-balance-card relative overflow-hidden rounded-[1.25rem] px-3.5 py-3 shadow-[0_12px_40px_rgba(11,74,140,0.35)] transition-all duration-300 ${
           showBreakdown ? "ring-2 ring-white/40" : showActions ? "ring-2 ring-white/50 ring-offset-2 ring-offset-[#F4F8FC]" : ""
         }`}
         onTouchStart={isTouch ? handleCardTouchStart : undefined}
@@ -183,16 +183,16 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
             aria-expanded={showBreakdown}
             aria-label="Opening balance details"
           >
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/75">
+            <p className="salt-balance-label text-[10px] font-bold uppercase tracking-[0.2em]">
               Opening Balance
             </p>
-            <p className="mt-0.5 text-2xl font-extrabold tabular-nums tracking-tight">
+            <p className="salt-balance-amount mt-0.5 text-2xl font-extrabold tabular-nums tracking-tight">
               {formatAmount(summary.net)}
             </p>
-            <p className="mt-0.5 text-[11px] leading-tight text-white/75">
+            <p className="salt-balance-hint mt-0.5 text-[11px] leading-tight">
               Current Available Balance
               {hasUnpaid && !showBreakdown ? (
-                <span className="text-white/45"> · {isTouch ? "hold" : "tap"} for details</span>
+                <span className="salt-balance-hint-muted"> · {isTouch ? "hold" : "tap"} for details</span>
               ) : null}
             </p>
           </button>

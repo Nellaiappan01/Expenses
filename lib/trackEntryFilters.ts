@@ -1,5 +1,5 @@
 import { SHEETS_SYNC_DEFERRED_NOR } from "./googleSheetsSync";
-import { AWAITING_APPROVER_MATCH, AWAITING_PAYMENT_MATCH } from "./paymentWorkflow";
+import { AWAITING_PAYMENT_MATCH } from "./paymentWorkflow";
 
 export type TrackFilterParams = {
   from?: string | null;
@@ -122,13 +122,23 @@ export function buildTrackEntryMatch(
 
   const workflowStatus = filters.workflowStatus?.trim();
   if (workflowStatus === "approval_pending") {
-    andWorkflowMatch(match, AWAITING_APPROVER_MATCH);
+    andWorkflowMatch(match, {
+      $or: [
+        {
+          type: "expense",
+          isNil: { $ne: true },
+          approvalStatus: "pending",
+          paymentStatus: { $ne: "paid" },
+          $or: [{ approvedBy: { $exists: false } }, { approvedBy: null }, { approvedBy: "" }],
+        },
+        { type: "expense", isNil: true },
+      ],
+    });
   } else if (workflowStatus === "payment_pending") {
     andWorkflowMatch(match, AWAITING_PAYMENT_MATCH);
   } else if (workflowStatus === "paid") {
     const paidOr = [
-      { type: { $ne: "expense" } },
-      { paymentStatus: "paid" },
+      { type: "expense", paymentStatus: "paid" },
       {
         type: "expense",
         paymentStatus: { $exists: false },

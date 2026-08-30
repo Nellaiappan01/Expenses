@@ -9,6 +9,26 @@ function normalizeMethod(value: unknown): ExpensePersonPreferredMethod {
   return "cash";
 }
 
+export function sanitizeMobile(raw: unknown): string | undefined {
+  const digits = cleanText(raw).replace(/\D/g, "");
+  if (!digits) return undefined;
+  const ten =
+    digits.length === 12 && digits.startsWith("91")
+      ? digits.slice(2)
+      : digits.length === 11 && digits.startsWith("0")
+        ? digits.slice(1)
+        : digits.length > 10
+          ? digits.slice(-10)
+          : digits;
+  return ten.length === 10 ? ten : undefined;
+}
+
+export function formatMobileDisplay(mobile?: string): string {
+  const digits = sanitizeMobile(mobile);
+  if (!digits) return "";
+  return `${digits.slice(0, 5)} ${digits.slice(5)}`;
+}
+
 export function sanitizeExpensePerson(raw: Partial<ExpensePerson>): ExpensePerson | null {
   const name = cleanText(raw.name);
   if (!name) return null;
@@ -18,6 +38,7 @@ export function sanitizeExpensePerson(raw: Partial<ExpensePerson>): ExpensePerso
     nameLower: name.toLowerCase(),
     preferredMethod,
     cashOk: preferredMethod === "cash" ? true : Boolean(raw.cashOk),
+    mobile: sanitizeMobile(raw.mobile),
     upiId: cleanText(raw.upiId) || undefined,
     bankAccount: cleanText(raw.bankAccount) || undefined,
     ifsc: cleanText(raw.ifsc).toUpperCase() || undefined,
@@ -104,7 +125,7 @@ export function paymentMethodFromPerson(
   person: ExpensePerson | undefined
 ): "Cash" | "Bank Transfer" | "GPay / UPI" {
   if (!person) return "Bank Transfer";
-  if (person.preferredMethod === "gpay" && person.upiId) return "GPay / UPI";
+  if (person.preferredMethod === "gpay" && (person.upiId || person.mobile)) return "GPay / UPI";
   if (person.preferredMethod === "bank") return "Bank Transfer";
   if (person.preferredMethod === "cash") return "Cash";
   if (person.upiId) return "GPay / UPI";
@@ -119,11 +140,15 @@ export function expensePersonPaymentSummary(person: ExpensePerson): {
 } {
   const method = person.preferredMethod ?? "cash";
   if (method === "gpay") {
-    const verified = Boolean(person.upiId?.trim());
+    const verified = Boolean(person.upiId?.trim() || person.mobile?.trim());
     return {
       methodLabel: "GPay",
       verified,
-      verifiedLabel: verified ? "UPI verified" : "Add UPI ID",
+      verifiedLabel: person.upiId?.trim()
+        ? "UPI verified"
+        : person.mobile?.trim()
+          ? "Mobile saved"
+          : "Add mobile / UPI",
     };
   }
   if (method === "bank") {

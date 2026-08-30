@@ -7,6 +7,7 @@ import { formatEntryAmount } from "@/lib/entryDisplay";
 import type { Entry } from "@/lib/types";
 import { canUserModifyEntry, requestLabel } from "@/lib/paymentWorkflow";
 import SearchableDropdown from "../ui/SearchableDropdown";
+import DdMmYyyyDateInput from "../ui/DdMmYyyyDateInput";
 import { useUser } from "@/app/context/UserContext";
 
 export default function ApproveOnSiteSheet({
@@ -175,13 +176,11 @@ export default function ApproveOnSiteSheet({
                   </svg>
                   Payment date <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="date"
+                <DdMmYyyyDateInput
                   value={paymentDueDate}
-                  onChange={(e) => setPaymentDueDate(e.target.value)}
+                  onChange={setPaymentDueDate}
                   required
-                  aria-label="Payment date"
-                  className="w-full min-h-[48px] rounded-xl border border-[#D6E6F5] bg-white px-3 py-3 text-base text-[#0B4A8C] outline-none focus:border-[#0B4A8C] [font-size:16px]"
+                  ariaLabel="Payment date"
                 />
                 <p className="mt-2 text-xs text-[#5A7FA5]">
                   Which date will you pay <strong>{entry.name}</strong>? Admin will see this.

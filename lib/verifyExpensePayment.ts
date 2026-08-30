@@ -23,8 +23,9 @@ export async function markExpensePaymentPaid(
   const businessId = existing.businessId as string;
   const approvalStatus = existing.approvalStatus as string | undefined;
   const isLegacy = !approvalStatus && !existing.paymentStatus;
+  const hasApprover = Boolean(String(existing.approvedBy ?? "").trim());
 
-  if (!isLegacy && approvalStatus !== "approved") {
+  if (!isLegacy && approvalStatus !== "approved" && !hasApprover) {
     return { ok: false, error: "Expense must be approved before payment" };
   }
   if (existing.paymentStatus === "paid") {
@@ -98,7 +99,6 @@ export async function markExpensePaymentPaid(
   const adjustReason = `Paid via ${paymentMethod}${paymentReference ? ` — ${paymentReference}` : ""}`;
 
   if (options?.deferSheets) {
-    await markEntrySyncStatus(db, id, businessId, "pending");
     return { ok: true, entry: paidDoc };
   }
 

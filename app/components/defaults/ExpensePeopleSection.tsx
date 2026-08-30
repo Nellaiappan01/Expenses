@@ -81,13 +81,12 @@ export default function ExpensePeopleSection({
   }
 
   return (
-    <section className="rounded-2xl border border-[#D6E6F5] bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-bold text-[#0B4A8C]">Requested by</h2>
-      <p className="mt-1 text-xs leading-relaxed text-[#5A7FA5]">
+    <div>
+      <p className="mb-3 text-xs leading-relaxed text-[#5A7FA5]">
         Tap a name to add or edit payment details. Save defaults when finished.
       </p>
 
-      <div className="mt-3 flex gap-2">
+      <div className="flex gap-2">
         <input
           type="text"
           value={draft}
@@ -138,6 +137,11 @@ export default function ExpensePeopleSection({
                         <div className="mt-1 flex flex-wrap items-center gap-1">
                           <MethodBadge method={summary.methodLabel} />
                           <VerifiedBadge verified={summary.verified} label={summary.verifiedLabel} />
+                          {person.mobile ? (
+                            <span className="text-[10px] font-semibold tabular-nums text-[#5A7FA5]">
+                              {person.mobile}
+                            </span>
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -200,6 +204,29 @@ export default function ExpensePeopleSection({
                           {m.label}
                         </button>
                       ))}
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="mb-1 block text-xs font-medium text-[#5A7FA5]">
+                        Mobile number
+                      </label>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        value={person.mobile ?? ""}
+                        onChange={(e) =>
+                          updatePerson(index, {
+                            mobile: e.target.value.replace(/\D/g, "").slice(0, 10),
+                          })
+                        }
+                        placeholder="10-digit mobile"
+                        className={fieldClass()}
+                      />
+                      {method === "gpay" ? (
+                        <p className="mt-1 text-[11px] leading-snug text-[#5A7FA5]">
+                          Admin copies this number in Pay to send GPay.
+                        </p>
+                      ) : null}
                     </div>
 
                     {method === "gpay" && (
@@ -277,6 +304,6 @@ export default function ExpensePeopleSection({
           })}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

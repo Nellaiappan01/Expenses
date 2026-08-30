@@ -6,6 +6,7 @@ import { getDb } from "@/lib/mongodb";
 import { healNamedApprovals } from "@/lib/healNamedApprovals";
 import { validatePaymentReference } from "@/lib/paymentReference";
 import { scheduleSheetsUpserts } from "@/lib/googleSheetsSync";
+import { AWAITING_PAYMENT_MATCH } from "@/lib/paymentWorkflow";
 import { markExpensePaymentPaid } from "@/lib/verifyExpensePayment";
 import type { PaymentVerifiedMethod } from "@/lib/types";
 
@@ -30,13 +31,14 @@ export async function POST(request: NextRequest) {
     const from = typeof body.from === "string" ? body.from.trim() : "";
     const to = typeof body.to === "string" ? body.to.trim() : "";
     const businessId = typeof body.businessId === "string" ? body.businessId.trim() : "";
+    const category = typeof body.category === "string" ? body.category.trim() : "";
     const ids = Array.isArray(body.ids)
       ? body.ids.filter((id: unknown) => typeof id === "string" && ObjectId.isValid(id))
       : [];
 
-    if (!requestedBy && ids.length === 0) {
+    if (!requestedBy && ids.length === 0 && !businessId) {
       return NextResponse.json(
-        { error: "Select a Requested by person (or specific entries) before bulk pay" },
+        { error: "Select a site, a person, or tick the pending entries to pay" },
         { status: 400 }
       );
     }
@@ -67,13 +69,15 @@ export async function POST(request: NextRequest) {
     await healNamedApprovals(db, businessId || undefined);
 
     const match: Record<string, unknown> = {
-      type: "expense",
       ...NOT_DELETED_MATCH,
-      approvalStatus: "approved",
-      paymentStatus: "pending",
+      ...AWAITING_PAYMENT_MATCH,
     };
     if (businessId) match.businessId = businessId;
     if (requestedBy) match.nameLower = requestedBy.toLowerCase();
+    if (category) {
+      const escaped = category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      match.category = { $regex: `^${escaped}$`, $options: "i" };
+    }
     if (from || to) {
       const dateMatch: Record<string, string> = {};
       if (from) dateMatch.$gte = from;

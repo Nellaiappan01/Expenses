@@ -41,7 +41,9 @@ export function isAwaitingApprover(entry: {
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
   approvedBy?: string;
+  isNil?: boolean;
 }): boolean {
+  if (entry.isNil) return false;
   if (entry.type !== "expense") return false;
   if (isLegacyWorkflowEntry(entry)) return false;
   if (entry.paymentStatus === "paid") return false;
@@ -56,7 +58,9 @@ export function isAwaitingPayment(entry: {
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
   approvedBy?: string;
+  isNil?: boolean;
 }): boolean {
+  if (entry.isNil) return false;
   if (entry.type !== "expense") return false;
   if (isLegacyWorkflowEntry(entry)) return false;
   if (entry.paymentStatus === "paid") return false;
@@ -66,6 +70,7 @@ export function isAwaitingPayment(entry: {
 
 export const AWAITING_APPROVER_MATCH: Record<string, unknown> = {
   type: "expense",
+  isNil: { $ne: true },
   approvalStatus: "pending",
   paymentStatus: { $ne: "paid" },
   $or: [{ approvedBy: { $exists: false } }, { approvedBy: null }, { approvedBy: "" }],
@@ -73,6 +78,7 @@ export const AWAITING_APPROVER_MATCH: Record<string, unknown> = {
 
 export const AWAITING_PAYMENT_MATCH: Record<string, unknown> = {
   type: "expense",
+  isNil: { $ne: true },
   paymentStatus: { $ne: "paid" },
   approvalStatus: { $ne: "rejected" },
   $or: [{ approvalStatus: "approved" }, { approvedBy: { $gt: "" } }],
@@ -82,12 +88,20 @@ export function workflowBadgeMeta(entry: {
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
   approvedBy?: string;
+  isNil?: boolean;
 }): {
   label: string;
   className: string;
-  icon: "pending_approval" | "payment_pending" | "paid" | "rejected";
+  icon: "pending_approval" | "payment_pending" | "paid" | "rejected" | "nil";
 } | null {
   if (entry.type !== "expense") return null;
+  if (entry.isNil) {
+    return {
+      label: "Nil",
+      className: "bg-slate-100 text-slate-700 ring-1 ring-slate-200/80",
+      icon: "nil",
+    };
+  }
   if (!entry.approvalStatus && !entry.paymentStatus) return null;
 
   if (entry.approvalStatus === "rejected") {
@@ -135,13 +149,31 @@ export function formatSheetPaymentStatus(entry: {
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
   approvedBy?: string;
+  isNil?: boolean;
 }): string {
   if (entry.type !== "expense") return "";
+  if (entry.isNil) return "Nil";
   if (isLegacyWorkflowEntry(entry)) return "Paid / Verified";
   if (entry.approvalStatus === "rejected") return "Rejected";
   if (entry.paymentStatus === "paid") return "Paid / Verified";
   if (entry.approvalStatus === "pending" && !entry.approvedBy?.trim()) return "Pending Approval";
   return "Payment Pending";
+}
+
+/** Approved on site, not paid yet — user can send it back to Pending. */
+export function canUserRevertOnSiteApproval(entry: {
+  type?: string;
+  approvalStatus?: ApprovalStatus;
+  paymentStatus?: PaymentStatus;
+  approvedBy?: string;
+  isNil?: boolean;
+}): boolean {
+  if (entry.isNil) return false;
+  if (entry.type !== "expense") return false;
+  if (isLegacyWorkflowEntry(entry)) return false;
+  if (entry.paymentStatus === "paid") return false;
+  if (entry.approvalStatus === "rejected") return false;
+  return entry.approvalStatus === "approved" || hasApproverName(entry);
 }
 
 /** Users may edit/delete workflow expenses only while awaiting admin approval. */
@@ -150,7 +182,9 @@ export function canUserModifyEntry(entry: {
   approvalStatus?: ApprovalStatus;
   paymentStatus?: PaymentStatus;
   approvedBy?: string;
+  isNil?: boolean;
 }): boolean {
+  if (entry.isNil) return true;
   if (entry.type !== "expense") return true;
   if (isLegacyWorkflowEntry(entry)) return true;
   if (entry.paymentStatus === "paid") return false;
@@ -172,7 +206,7 @@ export function entryModifyLockReason(entry: {
     return "Admin marked this as paid / verified. Date, amount, and other fields cannot be changed.";
   }
   if (entry.approvalStatus === "approved" || hasApproverName(entry)) {
-    return "Approved on site — waiting for admin payment. Date and amount cannot be changed until then.";
+    return "Approved on site. Tap Reverse approval to edit or delete.";
   }
   return "This entry cannot be changed.";
 }
@@ -187,7 +221,7 @@ export function entryLockShortLabel(entry: {
   if (canUserModifyEntry(entry)) return null;
   if (entry.paymentStatus === "paid") return "Paid / verified — cannot edit";
   if (entry.approvalStatus === "rejected") return "Rejected — cannot edit";
-  if (entry.approvalStatus === "approved" || hasApproverName(entry)) return "Waiting payment — cannot edit";
+  if (entry.approvalStatus === "approved" || hasApproverName(entry)) return null;
   return "Cannot edit";
 }
 

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 type SearchableDropdownProps = {
   label?: string;
   hideLabel?: boolean;
+  leadingIcon?: React.ReactNode;
   value: string;
   onChange: (value: string) => void;
   options: string[];
@@ -118,6 +119,7 @@ function OptionList({
 export default function SearchableDropdown({
   label,
   hideLabel = false,
+  leadingIcon,
   value,
   onChange,
   options,
@@ -242,6 +244,14 @@ export default function SearchableDropdown({
     inputClassName ??
     "w-full rounded-xl bg-zinc-100 px-4 py-3.5 text-base text-zinc-900 placeholder-zinc-400 outline-none transition-colors focus:bg-zinc-50 focus:ring-2 focus:ring-emerald-500/30 [font-size:16px]";
 
+  const embeddedFieldClasses = leadingIcon
+    ? `${inputClasses} flex items-center gap-2 !px-3 focus-within:border-[rgba(11,74,140,0.22)] focus-within:bg-white focus-within:shadow-[0_0_0_3px_rgba(11,74,140,0.1)]`
+    : inputClasses;
+
+  const embeddedInputClasses = leadingIcon
+    ? "min-w-0 flex-1 border-0 bg-transparent p-0 text-base text-[var(--foreground)] outline-none placeholder:text-[var(--text-faint)] [font-size:16px]"
+    : inputClasses;
+
   const sheetMaxHeight =
     viewportHeight != null ? `${Math.min(viewportHeight * 0.88, 560)}px` : "min(88dvh, 560px)";
 
@@ -345,12 +355,19 @@ export default function SearchableDropdown({
           type="button"
           onPointerDown={(e) => e.preventDefault()}
           onClick={openPicker}
-          className={`relative flex w-full items-center justify-between gap-2 text-left ${inputClasses} cursor-pointer pr-9`}
+          className={`relative flex w-full items-center justify-between gap-2 text-left ${embeddedFieldClasses} cursor-pointer pr-9`}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-label={displayLabel}
         >
-          <span className={value ? "truncate text-[#0B4A8C]" : "truncate text-[#9BB5CC]"}>
+          {leadingIcon ? (
+            <span className="shrink-0 text-[#0B4A8C]" aria-hidden>
+              {leadingIcon}
+            </span>
+          ) : null}
+          <span
+            className={`min-w-0 flex-1 truncate ${value ? "text-[#0B4A8C]" : "text-[#9BB5CC]"}`}
+          >
             {value || placeholder}
           </span>
           <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#7A9BB8]">
@@ -358,7 +375,12 @@ export default function SearchableDropdown({
           </span>
         </button>
       ) : (
-        <div className="relative">
+        <div className={`relative ${leadingIcon ? embeddedFieldClasses : ""}`}>
+          {leadingIcon ? (
+            <span className="pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 text-[#0B4A8C]" aria-hidden>
+              {leadingIcon}
+            </span>
+          ) : null}
           <input
             ref={inputRef}
             type="text"
@@ -379,7 +401,7 @@ export default function SearchableDropdown({
             required={required}
             enterKeyHint={enterKeyHint}
             autoComplete="off"
-            className={inputClasses}
+            className={leadingIcon ? `${embeddedInputClasses} pl-9 pr-3` : inputClasses}
           />
         </div>
       )}
