@@ -45,6 +45,7 @@ import SheetsSyncBanner from "../components/SheetsSyncBanner";
 import type { SerializedProduction } from "@/lib/dailyProduction";
 import { formatProductionTonnes } from "@/lib/productionDisplay";
 import ProductionDayBanner from "../components/salt/ProductionDayBanner";
+import AttachmentViewButton from "../components/salt/AttachmentViewButton";
 
 function formatDate(isoDate: string) {
   return formatDateDDMMYYYY(isoDate);
@@ -1030,6 +1031,7 @@ export default function TrackPage() {
                                     </td>
                                     <td className="track-col-status px-2 py-2.5 align-top">
                                       <div className="flex flex-nowrap items-center gap-1">
+                                        <AttachmentViewButton entry={entry} />
                                         <PaymentStatusBadge
                                           entry={entry}
                                           iconOnly={isAwaitingApprover(entry)}
@@ -1150,6 +1152,7 @@ export default function TrackPage() {
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <div className="flex flex-wrap items-center justify-end gap-1">
+                          <AttachmentViewButton entry={entry} />
                           <PaymentStatusBadge
                             entry={entry}
                             iconOnly={isAwaitingApprover(entry)}

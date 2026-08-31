@@ -26,9 +26,13 @@ export function stockPhotoUrl(id: string, cacheBust?: number): string {
     : `/api/stock/${id}/photo`;
 }
 
-export async function compressImageFile(file: File): Promise<string> {
+export async function compressImageFile(
+  file: File,
+  options?: { maxSide?: number; quality?: number }
+): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const maxSide = 960;
+  const maxSide = options?.maxSide ?? 960;
+  const quality = options?.quality ?? 0.82;
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const w = Math.round(bitmap.width * scale);
   const h = Math.round(bitmap.height * scale);
@@ -39,5 +43,5 @@ export async function compressImageFile(file: File): Promise<string> {
   if (!ctx) throw new Error("Could not process image");
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.82);
+  return canvas.toDataURL("image/jpeg", quality);
 }

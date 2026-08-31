@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, readApiJson } from "@/lib/api";
 import { compressImageFile } from "@/lib/stockTypes";
 
 type Props = {
@@ -14,6 +14,8 @@ type Props = {
   entryDate?: string;
 };
 
+type Phase = "idle" | "compress" | "upload";
+
 export default function AttachmentUploader({
   attachmentUrl,
   attachmentPublicId,
@@ -23,30 +25,48 @@ export default function AttachmentUploader({
   variant = "default",
   entryDate,
 }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [dragOver, setDragOver] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const openPicker = () => {
+    if (busy) return;
+    setPickerOpen(true);
+  };
+
+  const openCamera = () => {
+    setPickerOpen(false);
+    cameraInputRef.current?.click();
+  };
+
+  const openGallery = () => {
+    setPickerOpen(false);
+    galleryInputRef.current?.click();
+  };
 
   const uploadImageData = useCallback(
     async (imageData: string) => {
-      setBusy(true);
-      try {
-        const res = await apiFetch("/api/entries/attachment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageData, date: entryDate }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Upload failed");
-        onChange(data.url, data.publicId, data.driveUrl || null);
-        if (data.driveError) {
-          onError?.(data.driveError);
-        }
-      } catch (err) {
-        onError?.(err instanceof Error ? err.message : "Upload failed");
-      } finally {
-        setBusy(false);
+      setPhase("upload");
+      const res = await apiFetch("/api/entries/attachment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData, date: entryDate }),
+      });
+      const data = await readApiJson<{
+        error?: string;
+        url?: string;
+        publicId?: string;
+        driveUrl?: string;
+        driveError?: string;
+      }>(res);
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      onChange(data.url || null, data.publicId || null, data.driveUrl || null);
+      if (data.driveError) {
+        onError?.(data.driveError);
       }
     },
     [entryDate, onChange, onError]
@@ -55,19 +75,153 @@ export default function AttachmentUploader({
   const processFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
-      if (!file.type.startsWith("image/")) {
+      if (!file.type.startsWith("image/") && file.type !== "") {
         onError?.("Please choose an image file");
         return;
       }
+      setBusy(true);
+      setPhase("compress");
       try {
-        const dataUrl = await compressImageFile(file);
+        const dataUrl = await compressImageFile(file, { maxSide: 800, quality: 0.7 });
         await uploadImageData(dataUrl);
-      } catch {
-        onError?.("Could not process image");
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : "Could not process image");
+      } finally {
+        setBusy(false);
+        setPhase("idle");
+        if (cameraInputRef.current) cameraInputRef.current.value = "";
+        if (galleryInputRef.current) galleryInputRef.current.value = "";
       }
     },
     [onError, uploadImageData]
   );
+
+  const fileInputs = (
+    <>
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => void processFile(e.target.files?.[0])}
+      />
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => void processFile(e.target.files?.[0])}
+      />
+    </>
+  );
+
+  const pickerSheet = pickerOpen ? (
+    <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40"
+        aria-label="Close photo options"
+        onClick={() => setPickerOpen(false)}
+      />
+      <div
+        role="dialog"
+        aria-label="Add photo"
+        className="relative z-10 w-full max-w-sm rounded-t-3xl bg-white p-4 shadow-xl sm:rounded-2xl"
+      >
+        <p className="mb-1 text-sm font-bold text-[#0B4A8C]">Add photo</p>
+        <p className="mb-3 text-xs text-[#7A9BB8]">Take a picture or pick one from your gallery</p>
+        <div className="grid gap-2">
+          <button
+            type="button"
+            onClick={openCamera}
+            className="flex items-center gap-3 rounded-xl bg-[#0B4A8C] px-4 py-3.5 text-left text-sm font-semibold text-white"
+          >
+            <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.75}
+                d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+              />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Open camera
+          </button>
+          <button
+            type="button"
+            onClick={openGallery}
+            className="flex items-center gap-3 rounded-xl bg-[#E8F2FA] px-4 py-3.5 text-left text-sm font-semibold text-[#0B4A8C]"
+          >
+            <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.75}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+            Choose from gallery
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const manageSheet =
+    manageOpen && attachmentUrl ? (
+      <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-4">
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/40"
+          aria-label="Close attachment"
+          onClick={() => setManageOpen(false)}
+        />
+        <div role="dialog" aria-label="Attachment" className="relative z-10 w-full max-w-sm rounded-t-3xl bg-white p-4 shadow-xl sm:rounded-2xl">
+          <p className="mb-3 text-sm font-bold text-[#0B4A8C]">Attachment</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={attachmentUrl} alt="Attachment preview" className="mx-auto max-h-48 rounded-lg object-contain" />
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setManageOpen(false);
+                openPicker();
+              }}
+              className="flex-1 rounded-xl bg-[#E8F2FA] py-3 text-sm font-semibold text-[#0B4A8C]"
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange(null, attachmentPublicId, null);
+                setManageOpen(false);
+              }}
+              className="flex-1 rounded-xl bg-red-50 py-3 text-sm font-semibold text-red-600"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  const busyOverlay = (compactArea: boolean) =>
+    busy ? (
+      <div
+        className={
+          compactArea
+            ? "absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-white/90"
+            : "absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-white/80"
+        }
+      >
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#0B4A8C] border-t-transparent" />
+        <span className="mt-1 text-[9px] font-bold uppercase tracking-wide text-[#0B4A8C]">
+          {phase === "compress" ? "Shrinking…" : "Uploading…"}
+        </span>
+      </div>
+    ) : null;
 
   if (variant === "icon") {
     return (
@@ -80,17 +234,19 @@ export default function AttachmentUploader({
               setManageOpen(true);
               return;
             }
-            inputRef.current?.click();
+            openPicker();
           }}
-          aria-label={attachmentUrl ? "Attachment added — tap to manage" : "Add attachment (optional)"}
-          className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+          aria-label={attachmentUrl ? "Attachment added — tap to manage" : "Add photo from camera or gallery"}
+          className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border transition-colors ${
             attachmentUrl
               ? "border-[rgba(11,74,140,0.22)] bg-[#E8F2FA] text-[#0B4A8C]"
               : "border-transparent bg-[#f1f5f9] text-[#7A9BB8] hover:bg-[#E8F2FA] hover:text-[#0B4A8C]"
           }`}
         >
           {busy ? (
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#0B4A8C] border-t-transparent" />
+            <div className="flex flex-col items-center">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#0B4A8C] border-t-transparent" />
+            </div>
           ) : (
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path
@@ -102,67 +258,16 @@ export default function AttachmentUploader({
             </svg>
           )}
           {attachmentUrl && !busy ? (
-            <span
-              className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white"
-              aria-hidden
-            />
+            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" aria-hidden />
           ) : null}
         </button>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={(e) => void processFile(e.target.files?.[0])}
-        />
-
-        {manageOpen && attachmentUrl ? (
-          <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-4">
-            <button
-              type="button"
-              className="absolute inset-0 bg-black/40"
-              aria-label="Close attachment"
-              onClick={() => setManageOpen(false)}
-            />
-            <div
-              role="dialog"
-              aria-label="Attachment"
-              className="relative z-10 w-full max-w-sm rounded-t-3xl bg-white p-4 shadow-xl sm:rounded-2xl"
-            >
-              <p className="mb-3 text-sm font-bold text-[#0B4A8C]">Attachment</p>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={attachmentUrl}
-                alt="Attachment preview"
-                className="mx-auto max-h-48 rounded-lg object-contain"
-              />
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setManageOpen(false);
-                    inputRef.current?.click();
-                  }}
-                  className="flex-1 rounded-xl bg-[#E8F2FA] py-3 text-sm font-semibold text-[#0B4A8C]"
-                >
-                  Replace
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange(null, attachmentPublicId, null);
-                    setManageOpen(false);
-                  }}
-                  className="flex-1 rounded-xl bg-red-50 py-3 text-sm font-semibold text-red-600"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          </div>
+        {busy ? (
+          <span className="sr-only">{phase === "compress" ? "Preparing photo" : "Uploading photo"}</span>
         ) : null}
+
+        {fileInputs}
+        {pickerSheet}
+        {manageSheet}
       </>
     );
   }
@@ -178,9 +283,9 @@ export default function AttachmentUploader({
       <div
         role="button"
         tabIndex={0}
-        aria-label="Add attachment optional"
-        onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-        onClick={() => !attachmentUrl && inputRef.current?.click()}
+        aria-label="Add photo from camera or gallery"
+        onKeyDown={(e) => e.key === "Enter" && openPicker()}
+        onClick={() => !attachmentUrl && openPicker()}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -194,25 +299,19 @@ export default function AttachmentUploader({
         className={`relative rounded-xl border-2 border-dashed text-center transition-colors ${
           compact ? "px-3 py-3" : "px-4 py-5"
         } ${
-          dragOver
-            ? "border-[#0B4A8C] bg-[#EEF5FC]"
-            : "border-[#B8CDE3] bg-[#F8FBFE] hover:border-[#7BA8D4]"
+          dragOver ? "border-[#0B4A8C] bg-[#EEF5FC]" : "border-[#B8CDE3] bg-[#F8FBFE] hover:border-[#7BA8D4]"
         }`}
       >
         {attachmentUrl ? (
           <div className="space-y-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={attachmentUrl}
-              alt="Attachment preview"
-              className="mx-auto max-h-40 rounded-lg object-contain"
-            />
+            <img src={attachmentUrl} alt="Attachment preview" className="mx-auto max-h-40 rounded-lg object-contain" />
             <div className="flex flex-wrap justify-center gap-2">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  inputRef.current?.click();
+                  openPicker();
                 }}
                 className="rounded-lg bg-[#EEF5FC] px-3 py-1.5 text-xs font-semibold text-[#0B4A8C]"
               >
@@ -235,12 +334,7 @@ export default function AttachmentUploader({
             <div
               className={`mx-auto flex items-center justify-center rounded-full bg-[#EEF5FC] text-[#0B4A8C] ${compact ? "mb-1 h-8 w-8" : "mb-2 h-10 w-10"}`}
             >
-              <svg
-                className={compact ? "h-4 w-4" : "h-5 w-5"}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg className={compact ? "h-4 w-4" : "h-5 w-5"} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -250,29 +344,17 @@ export default function AttachmentUploader({
               </svg>
             </div>
             <p className={`font-semibold text-[#0B4A8C] ${compact ? "text-xs" : "text-sm"}`}>
-              {compact ? "Attachment (optional)" : "Add Attachment (optional)"}
+              {compact ? "Camera or gallery" : "Take photo or choose from gallery"}
             </p>
-            {!compact && (
-              <p className="text-xs text-[#7A9BB8]">Receipt, Bill, Screenshot etc.</p>
-            )}
+            {!compact && <p className="text-xs text-[#7A9BB8]">Receipt, bill, or screenshot</p>}
           </>
         )}
 
-        {busy && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/80">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0B4A8C] border-t-transparent" />
-          </div>
-        )}
+        {busyOverlay(false)}
       </div>
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => void processFile(e.target.files?.[0])}
-      />
+      {fileInputs}
+      {pickerSheet}
     </div>
   );
 }

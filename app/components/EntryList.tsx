@@ -7,6 +7,7 @@ import { cachedApiJson, cacheKey, LEDGER_DATA_CHANGED, notifyLedgerDataChanged, 
 import { formatDateDDMMYYYY, toLocalDateString } from "@/lib/dateFormat";
 import type { SerializedProduction } from "@/lib/dailyProduction";
 import ProductionDayBanner from "./salt/ProductionDayBanner";
+import AttachmentViewButton from "./salt/AttachmentViewButton";
 import { entryAmountColorClass, formatEntryAmount } from "@/lib/entryDisplay";
 import { isNilEntry, nilEntryTitle, NIL_DETAIL } from "@/lib/nilEntry";
 import type { Entry } from "@/lib/types";
@@ -235,14 +236,17 @@ export default function EntryList({
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      <PaymentStatusBadge
-                        entry={entry}
-                        onPendingApprovalClick={
-                          !readOnly && canModify && isAwaitingApprover(entry)
-                            ? () => setApprovingEntry(entry)
-                            : undefined
-                        }
-                      />
+                      <div className="flex items-center gap-1">
+                        <AttachmentViewButton entry={entry} />
+                        <PaymentStatusBadge
+                          entry={entry}
+                          onPendingApprovalClick={
+                            !readOnly && canModify && isAwaitingApprover(entry)
+                              ? () => setApprovingEntry(entry)
+                              : undefined
+                          }
+                        />
+                      </div>
                       <div className="flex items-center gap-2">
                         <p
                           className={`font-bold tabular-nums ${entryAmountColorClass(entry)}`}

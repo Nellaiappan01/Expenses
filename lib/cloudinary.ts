@@ -63,6 +63,7 @@ export async function uploadExpenseAttachment(
       public_id: suffix,
       overwrite: true,
       resource_type: "image",
+      timeout: 60_000,
       invalidate: true,
     }
   );

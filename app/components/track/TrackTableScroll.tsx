@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-const STATUS_COL_PX = 112;
+const STATUS_COL_PX = 148;
 
 export default function TrackTableScroll({ children }: { children: ReactNode }) {
   const outerRef = useRef<HTMLDivElement>(null);
