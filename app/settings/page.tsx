@@ -68,8 +68,9 @@ function CopyButton({
 
 const SETUP_STEPS = [
   "Create a Google Sheet. Row 1 must use the copied column headers.",
-  "Copy script → Extensions → Apps Script → paste → Save.",
-  "Deploy → New deployment → Web app (Execute as: Me, Access: Anyone). Do not reuse an old deployment.",
+  "Copy script → Extensions → Apps Script → paste → Save. Use version 2026-11-19c.",
+  "Deploy → Manage deployments → Edit → New version (same Web App URL).",
+  "Home → Sheet creates the next tab. Confirm Auto Carry Forward or a custom opening. Existing tabs are left as they are.",
   "Paste the new Web App URL here, then Save settings.",
   "Drive receipts need that new deployment. Folder URL alone is not enough.",
 ];
@@ -86,6 +87,8 @@ export default function SettingsPage() {
   const [bannerImageData, setBannerImageData] = useState<string | null>(null);
   const [appsScriptSource, setAppsScriptSource] = useState("");
   const [appsScriptVersion, setAppsScriptVersion] = useState<string | null>(null);
+  const [scriptCopied, setScriptCopied] = useState(false);
+  const [scriptCopyError, setScriptCopyError] = useState("");
   const [driveScriptReady, setDriveScriptReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -111,18 +114,36 @@ export default function SettingsPage() {
   }, [config]);
 
   const loadAppsScript = useCallback(async () => {
-    try {
-      const res = await fetch("/api/integrations/apps-script");
-      const data = await res.json();
-      if (data.source) setAppsScriptSource(data.source);
-      if (data.version) setAppsScriptVersion(data.version);
-    } catch {
-      // ignore
+    const res = await apiFetch("/api/integrations/apps-script");
+    const data = await res.json();
+    if (!res.ok || typeof data.source !== "string" || !data.source) {
+      throw new Error(data.error || "Could not load the Apps Script");
     }
+    setAppsScriptSource(data.source);
+    if (data.version) setAppsScriptVersion(data.version);
+    return data.source as string;
   }, []);
 
+  async function copyAppsScript() {
+    setScriptCopyError("");
+    try {
+      const source = appsScriptSource || (await loadAppsScript());
+      if (!source.includes("2026-11-19c")) {
+        throw new Error("The script file is not version 2026-11-19c");
+      }
+      await navigator.clipboard.writeText(source);
+      setScriptCopied(true);
+      window.setTimeout(() => setScriptCopied(false), 2000);
+    } catch (err) {
+      setScriptCopied(false);
+      setScriptCopyError(err instanceof Error ? err.message : "Could not copy the Apps Script");
+    }
+  }
+
   useEffect(() => {
-    loadAppsScript();
+    loadAppsScript().catch(() => {
+      // The copy button loads the file again and shows the error there.
+    });
   }, [loadAppsScript]);
 
   useEffect(() => {
@@ -337,7 +358,14 @@ export default function SettingsPage() {
             onToggle={() => toggleCard("script")}
           >
             <div className="flex flex-wrap gap-2">
-              {appsScriptSource ? <CopyButton text={appsScriptSource} label="Copy script" variant="primary" /> : null}
+              <button
+                type="button"
+                onClick={() => void copyAppsScript()}
+                className="ui-btn-primary inline-flex !min-h-[40px] items-center justify-center gap-2 !py-2 !text-sm"
+              >
+                {scriptCopied ? <CheckIcon /> : <CopyIcon />}
+                {scriptCopied ? "Copied" : "Copy script"}
+              </button>
               <button
                 type="button"
                 onClick={() => setShowSetup((v) => !v)}
@@ -354,6 +382,9 @@ export default function SettingsPage() {
                 {showSetup ? "Hide steps" : "How to set up"}
               </button>
             </div>
+            {scriptCopyError ? (
+              <p className="mt-2 text-xs text-red-700">{scriptCopyError}</p>
+            ) : null}
 
             {showSetup ? (
               <ol className="mt-3 space-y-2.5">

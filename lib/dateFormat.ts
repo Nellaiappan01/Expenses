@@ -16,6 +16,34 @@ export function toLocalDateString(d: Date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Hariharan Salt Works keeps the books on the India calendar, including on UTC servers. */
+export const ACCOUNTING_TIME_ZONE = "Asia/Kolkata";
+
+export function accountingToday(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ACCOUNTING_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+export function accountingMonthStart(now: Date = new Date()): string {
+  return `${accountingToday(now).slice(0, 8)}01`;
+}
+
+/** Add calendar days to a YYYY-MM-DD date without a timezone shift. */
+export function addIsoDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return utc.toISOString().slice(0, 10);
+}
+
 /** Numeric form display: 30-08-2026 from YYYY-MM-DD */
 export function formatIsoDateDdMmYyyy(isoDate: string): string {
   const trimmed = isoDate.trim();

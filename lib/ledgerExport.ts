@@ -1,28 +1,14 @@
 import { buildSheetsPayload } from "./googleSheetsSync";
+import { compareLedgerOrder, entryEffectRupees } from "./ledgerMath";
 import type { Entry } from "./types";
 
-/** Signed change to wallet balance for one entry. */
+/** Signed change to the closing balance. Same rules as the home card and the active sheet tab. */
 export function entryBalanceDelta(entry: Entry): number {
-  switch (entry.type) {
-    case "rotation_cash":
-    case "adjustment":
-      return entry.amount;
-    case "expense":
-    case "worker_payment":
-      return -Math.abs(entry.amount);
-    default:
-      return 0;
-  }
+  return entryEffectRupees(entry);
 }
 
 export function sortEntriesChronologically(entries: Entry[]): Entry[] {
-  return [...entries].sort((a, b) => {
-    const dateCmp = a.date.localeCompare(b.date);
-    if (dateCmp !== 0) return dateCmp;
-    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return aTime - bTime;
-  });
+  return [...entries].sort(compareLedgerOrder);
 }
 
 export function sumBalanceDeltas(entries: Entry[]): number {

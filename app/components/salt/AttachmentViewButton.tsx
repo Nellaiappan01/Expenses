@@ -2,9 +2,19 @@
 
 import { useState } from "react";
 import type { Entry } from "@/lib/types";
+import { driveViewUrl } from "@/lib/googleDriveFolder";
 
-export function entryAttachmentViewUrl(entry: Pick<Entry, "attachmentUrl" | "attachmentDriveUrl">): string {
-  return entry.attachmentUrl?.trim() || entry.attachmentDriveUrl?.trim() || "";
+export function entryAttachmentViewUrl(
+  entry: Pick<Entry, "attachmentUrl" | "attachmentDriveUrl" | "attachmentPublicId">
+): string {
+  const direct = entry.attachmentUrl?.trim() || entry.attachmentDriveUrl?.trim() || "";
+  if (direct) return direct;
+  const publicId = entry.attachmentPublicId?.trim() || "";
+  if (publicId.startsWith("drive:")) {
+    const id = publicId.slice("drive:".length).trim();
+    if (id) return driveViewUrl(id);
+  }
+  return "";
 }
 
 function EyeIcon({ className }: { className?: string }) {
@@ -86,7 +96,7 @@ export default function AttachmentViewButton({
   entry,
   className = "",
 }: {
-  entry: Pick<Entry, "attachmentUrl" | "attachmentDriveUrl">;
+  entry: Pick<Entry, "attachmentUrl" | "attachmentDriveUrl" | "attachmentPublicId">;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);

@@ -38,11 +38,6 @@ export async function POST(request: NextRequest) {
     const errors: string[] = [];
 
     for (const entry of entries) {
-      if (entry.sheetsSyncStatus === "synced") {
-        synced += 1;
-        continue;
-      }
-
       const businessId = String(entry.businessId ?? "");
       if (!businessId) {
         failed += 1;

@@ -34,6 +34,7 @@ export default function WalletPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
 
   useEffect(() => {
     const features = config?.features ?? { expenses: false, workers: false, stock: false };
@@ -54,6 +55,15 @@ export default function WalletPage() {
   useEffect(() => {
     loadDefaults();
   }, [loadDefaults]);
+
+  useEffect(() => {
+    apiFetch("/api/balance")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.net === "number") setBalance(data.net);
+      })
+      .catch(() => undefined);
+  }, [success]);
 
   useEffect(() => {
     if (!success) return;
@@ -131,6 +141,11 @@ export default function WalletPage() {
           <div>
             <h1 className="text-xl font-bold text-zinc-900">Wallet</h1>
             <p className="text-sm text-zinc-500">Add or withdraw cash</p>
+            {balance !== null ? (
+              <p className="mt-1 text-sm font-semibold tabular-nums text-[#0B4A8C]">
+                Sheet balance ₹ {balance < 0 ? "-" : ""}{Math.abs(balance).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </p>
+            ) : null}
           </div>
         </header>
 

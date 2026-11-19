@@ -14,15 +14,15 @@ export function formatEntryAmount(amount: number, type: EntryType, isNil?: boole
   const formatted = Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
   if (type === "rotation_cash") {
-    return amount >= 0 ? `+₹${formatted}` : `-₹${formatted}`;
+    return amount >= 0 ? `+₹${formatted}` : `₹ -${formatted}`;
   }
   if (type === "adjustment") {
-    return amount >= 0 ? `+₹${formatted}` : `-₹${formatted}`;
+    return amount >= 0 ? `+₹${formatted}` : `₹ -${formatted}`;
   }
   if (type === "expense" || type === "worker_payment") {
-    return `-₹${formatted}`;
+    return `₹ -${formatted}`;
   }
-  return amount >= 0 ? `+₹${formatted}` : `-₹${formatted}`;
+  return amount >= 0 ? `+₹${formatted}` : `₹ -${formatted}`;
 }
 
 export function entryAmountColorClass(entry: EntryListItem): string {

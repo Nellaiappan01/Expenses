@@ -54,9 +54,9 @@ export function buildTotalsBreakdown(parts: {
 }
 
 export function formatCurrency(amount: number): string {
-  const sign = amount < 0 ? "-" : "";
-  return `${sign}₹${Math.abs(amount).toLocaleString("en-IN", {
+  const formatted = Math.abs(amount).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+  return amount < 0 ? `₹ -${formatted}` : `₹${formatted}`;
 }

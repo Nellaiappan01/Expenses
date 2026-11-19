@@ -233,8 +233,8 @@ export default function SheetsSyncBanner({
               the Google Sheet. Tap Sync All to remove {counts.removing === 1 ? "it" : "them"}.
             </p>
           ) : null}
-          {errorMessage && remaining > 0 && !syncing ? (
-            <p className="mt-2 text-xs font-medium text-red-800">{errorMessage}</p>
+          {(errorMessage || failureHints[0]) && remaining > 0 && !syncing ? (
+            <p className="mt-2 text-xs font-medium text-red-800">{errorMessage || failureHints[0]}</p>
           ) : null}
         </>
       )}

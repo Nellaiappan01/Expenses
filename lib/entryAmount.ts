@@ -65,6 +65,8 @@ export const ENTRY_TOTALS_GROUP_FIELDS = {
         {
           $and: [
             { $eq: ["$type", "expense"] },
+            { $ne: ["$isNil", true] },
+            { $ne: ["$approvalStatus", "rejected"] },
             { $eq: [{ $ifNull: ["$paymentStatus", "paid"] }, "paid"] },
           ],
         },

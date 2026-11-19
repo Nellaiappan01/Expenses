@@ -81,37 +81,109 @@ function isSheetRowNotFound(error?: string): boolean {
   return Boolean(error && /row not found/i.test(error));
 }
 
-function interpretSheetsResponse(res: Response, responseBody: string): SheetsSyncResult {
-  let parsed: { ok?: boolean; error?: string } | null = null;
-  if (responseBody.trim()) {
-    try {
-      parsed = JSON.parse(responseBody) as { ok?: boolean; error?: string };
-    } catch {
-      parsed = null;
+const APPS_SCRIPT_POST_HEADERS = { "Content-Type": "text/plain;charset=utf-8" };
+
+/**
+ * Apps Script web apps answer a POST with a redirect. Following that redirect
+ * automatically turns it into a GET and Google returns a Drive HTML page
+ * ("unable to open the file") instead of the script result, so the sheet never
+ * updates. POST as text, stop at the redirect, then read the result URL.
+ */
+export async function postAppsScript(
+  webhook: string,
+  payload: unknown,
+  timeoutMs: number
+): Promise<{ response: Response; body: string }> {
+  const res = await fetch(webhook, {
+    method: "POST",
+    headers: APPS_SCRIPT_POST_HEADERS,
+    body: JSON.stringify(payload),
+    redirect: "manual",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get("location");
+    if (!location) {
+      return { response: res, body: "" };
     }
+    const resultUrl = new URL(location, webhook).toString();
+    const follow = await fetch(resultUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const body = await follow.text().catch(() => "");
+    return { response: follow, body };
   }
 
-  if (parsed && parsed.ok === false) {
-    return {
-      ok: false,
-      status: "failed",
-      error: parsed.error || "Google Sheets returned an error",
-      responseStatus: res.status,
-      responseBody,
-    };
+  const body = await res.text().catch(() => "");
+  return { response: res, body };
+}
+export const SHEETS_WRITE_ACTIONS = [
+  "append",
+  "update",
+  "delete",
+  "recalculate",
+  "upsertdailyproduction",
+  "deletedailyproduction",
+  "createledgersheet",
+] as const;
+
+export function interpretSheetsResponse(res: Response, responseBody: string): SheetsSyncResult {
+  const body = responseBody.trim();
+  const failed = (error: string): SheetsSyncResult => ({
+    ok: false,
+    status: "failed",
+    error,
+    responseStatus: res.status,
+    responseBody: body.startsWith("<") ? body.slice(0, 180) : body,
+  });
+
+  if (body.startsWith("<") || /unable to open the file/i.test(body)) {
+    return failed("Google Sheets returned HTML instead of a write result");
   }
 
   if (!res.ok) {
-    return {
-      ok: false,
-      status: "failed",
-      error: responseBody || `HTTP ${res.status}`,
-      responseStatus: res.status,
-      responseBody,
-    };
+    return failed(body || `HTTP ${res.status}`);
+  }
+
+  if (!body) {
+    return failed("Google Sheets returned an empty response");
+  }
+
+  let parsed: { ok?: boolean; error?: string; action?: string; message?: string } | null = null;
+  try {
+    parsed = JSON.parse(body) as { ok?: boolean; error?: string; action?: string; message?: string };
+  } catch {
+    return failed("Google Sheets returned malformed JSON");
+  }
+
+  if (!parsed || parsed.ok !== true) {
+    return failed(parsed?.error || "Google Sheets returned an error");
+  }
+
+  const action = String(parsed.action || "").trim().toLowerCase();
+  if (!SHEETS_WRITE_ACTIONS.includes(action as (typeof SHEETS_WRITE_ACTIONS)[number])) {
+    return failed("Google Sheets response had no completed write action");
   }
 
   return { ok: true, status: "synced", responseStatus: res.status, responseBody };
+}
+
+/** Timeout stays pending so the same Entry ID can be retried. Other transport errors stay failed. */
+export function sheetsTransportFailure(error: unknown): SheetsSyncResult {
+  const message = error instanceof Error ? error.message : "sync_failed";
+  if (isSheetsTimeout(error)) {
+    return {
+      ok: false,
+      status: "pending",
+      timedOut: true,
+      error:
+        "Google Sheet is still writing. Do not tap Sync again yet — retry will update the same row, not add a duplicate.",
+    };
+  }
+  return { ok: false, status: "failed", error: message };
 }
 
 export function buildSheetsPayload(row: {
@@ -243,18 +315,16 @@ export async function appendEntryToGoogleSheets(
   console.info("[Google Sheets] POST", webhook, JSON.stringify(payload));
 
   try {
-    const res = await fetch(webhook, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(SHEETS_FETCH_TIMEOUT_MS),
-    });
+    const { response, body: responseBody } = await postAppsScript(
+      webhook,
+      payload,
+      SHEETS_FETCH_TIMEOUT_MS
+    );
 
-    const responseBody = await res.text().catch(() => "");
-    console.info("[Google Sheets] response status:", res.status);
-    console.info("[Google Sheets] response body:", responseBody || "(empty)");
+    console.info("[Google Sheets] response status:", response.status);
+    console.info("[Google Sheets] response body:", responseBody ? responseBody.slice(0, 500) : "(empty)");
 
-    const interpreted = interpretSheetsResponse(res, responseBody);
+    const interpreted = interpretSheetsResponse(response, responseBody);
     if (interpreted.ok) {
       console.info("[Google Sheets] sync succeeded");
     } else {
@@ -264,16 +334,7 @@ export async function appendEntryToGoogleSheets(
   } catch (error) {
     const message = error instanceof Error ? error.message : "sync_failed";
     console.error("[Google Sheets] request error:", message);
-    if (isSheetsTimeout(error)) {
-      return {
-        ok: false,
-        status: "pending",
-        timedOut: true,
-        error:
-          "Google Sheet is still writing. Do not tap Sync again yet — retry will update the same row, not add a duplicate.",
-      };
-    }
-    return { ok: false, status: "failed", error: message };
+    return sheetsTransportFailure(error);
   }
 }
 
@@ -287,14 +348,12 @@ export async function recalculateGoogleSheetBalances(
   }
 
   try {
-    const res = await fetch(webhook, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "recalculate" }),
-      signal: AbortSignal.timeout(SHEETS_FETCH_TIMEOUT_MS),
-    });
-    const responseBody = await res.text().catch(() => "");
-    return interpretSheetsResponse(res, responseBody);
+    const { response, body: responseBody } = await postAppsScript(
+      webhook,
+      { action: "recalculate" },
+      SHEETS_FETCH_TIMEOUT_MS
+    );
+    return interpretSheetsResponse(response, responseBody);
   } catch (error) {
     const message = error instanceof Error ? error.message : "recalculate_failed";
     if (isSheetsTimeout(error)) {
@@ -307,6 +366,19 @@ export async function recalculateGoogleSheetBalances(
     }
     return { ok: false, status: "failed", error: message };
   }
+}
+
+/** Wait out an in-flight write so a payment update is not dropped. */
+async function claimSheetsSyncLeaseWithRetry(
+  db: Db,
+  entryId: string,
+  businessId: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (await claimSheetsSyncLease(db, entryId, businessId)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return false;
 }
 
 async function claimSheetsSyncLease(
@@ -412,6 +484,23 @@ export async function syncEntryById(
   return { ...result, entryId };
 }
 
+/** Same Entry ID on every retry. The sheet updates that row instead of appending another. */
+export function buildSheetUpsertPayload(
+  entryId: string,
+  entryDoc: Record<string, unknown>,
+  originalEntry?: Record<string, unknown>,
+  adjustReason?: string
+): SheetsWebhookPayload {
+  const fingerprintSource = originalEntry ?? entryDoc;
+  return {
+    action: "update",
+    entryId,
+    match: buildSheetsMatch(entryDocToSheetsRow(fingerprintSource)),
+    ...buildSheetsPayload(entryDocToSheetsRow(entryDoc)),
+    adjustReason: adjustReason?.trim() || "",
+  };
+}
+
 /** Idempotent sheet write: update the row for this Entry ID, or append once if it is missing. */
 export async function upsertEntryToSheets(
   db: Db,
@@ -428,7 +517,7 @@ export async function upsertEntryToSheets(
     return { ok: false, status: "failed", error };
   }
 
-  const leased = await claimSheetsSyncLease(db, entryId, businessId);
+  const leased = await claimSheetsSyncLeaseWithRetry(db, entryId, businessId);
   if (!leased) {
     return {
       ok: false,
@@ -437,16 +526,35 @@ export async function upsertEntryToSheets(
     };
   }
 
+  const fresh = await db.collection("entries").findOne({
+    _id: new ObjectId(entryId),
+    businessId,
+  });
+  if (!fresh) {
+    await releaseSheetsSyncLease(db, entryId, businessId);
+    return { ok: false, status: "failed", error: "Entry not found" };
+  }
+  if (fresh.deleted) {
+    const removed = await postSheetsAdjustment(
+      webhookUrl,
+      entryId,
+      "delete",
+      fresh as Record<string, unknown>,
+      originalEntry ?? (fresh as Record<string, unknown>),
+      adjustReason
+    );
+    await persistSyncResult(db, entryId, businessId, removed);
+    return removed;
+  }
+
   await markEntrySyncStatus(db, entryId, businessId, "pending");
 
-  const fingerprintSource = originalEntry ?? entryDoc;
-  const payload: SheetsWebhookPayload = {
-    action: "update",
+  const payload = buildSheetUpsertPayload(
     entryId,
-    match: buildSheetsMatch(entryDocToSheetsRow(fingerprintSource)),
-    ...buildSheetsPayload(entryDocToSheetsRow(entryDoc)),
-    adjustReason: adjustReason?.trim() || "",
-  };
+    fresh as Record<string, unknown>,
+    originalEntry ?? (fresh as Record<string, unknown>),
+    adjustReason
+  );
   const result = await appendEntryToGoogleSheets(payload, webhookUrl);
   await persistSyncResult(db, entryId, businessId, result);
   return result;
@@ -618,7 +726,6 @@ export async function retryAllSheetsSyncs(
       businessId,
       deleted: { $ne: true },
       sheetsSyncStatus: { $in: statuses },
-      $nor: USER_SHEETS_SYNC_NOR,
     })
     .sort({ createdAt: 1 })
     .limit(limit)
@@ -652,22 +759,6 @@ export async function retryAllSheetsSyncs(
   return results;
 }
 
-/** Paid expenses — Google Sheet is updated by admin payment, not user Sync All. Nil days still sync. */
-export const USER_SHEETS_SYNC_EXCLUDED_NOR = {
-  type: "expense",
-  paymentStatus: "paid",
-  isNil: { $ne: true },
-} as const;
-
-/** Workflow expenses sync only after payment verify — not a sheets queue item yet. */
-export const SHEETS_SYNC_DEFERRED_NOR = {
-  type: "expense",
-  paymentStatus: "pending",
-  sheetsSyncedAt: { $exists: false },
-} as const;
-
-const USER_SHEETS_SYNC_NOR = [SHEETS_SYNC_DEFERRED_NOR, USER_SHEETS_SYNC_EXCLUDED_NOR];
-
 export function buildSheetsSyncQueueFilter(
   businessId: string,
   status?: "pending" | "failed"
@@ -676,7 +767,6 @@ export function buildSheetsSyncQueueFilter(
     businessId,
     deleted: { $ne: true },
     sheetsSyncStatus: status ?? { $in: ["pending", "failed"] },
-    $nor: USER_SHEETS_SYNC_NOR,
   };
 }
 
@@ -684,7 +774,6 @@ export async function getSheetsSyncCounts(db: Db, businessId: string) {
   const base = {
     businessId,
     deleted: { $ne: true },
-    $nor: USER_SHEETS_SYNC_NOR,
   };
   const [pending, failed, deletedPending, deletedFailed] = await Promise.all([
     db.collection("entries").countDocuments({ ...base, sheetsSyncStatus: "pending" }),
@@ -717,7 +806,6 @@ export async function getSheetsSyncFailureSample(db: Db, businessId: string, lim
       businessId,
       deleted: { $ne: true },
       sheetsSyncStatus: "failed",
-      $nor: USER_SHEETS_SYNC_NOR,
     })
     .project({ sheetsSyncError: 1 })
     .limit(limit)

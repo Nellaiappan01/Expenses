@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test lib/reliability.test.ts lib/sheetTabs.test.ts",
     "generate-icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
     "eslint-config-next": "16.1.7",
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

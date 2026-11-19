@@ -36,7 +36,7 @@ export default function ProductionDayBanner({
       if (data.sheetsSyncStatus === "failed") {
         throw new Error(
           data.sheetsSyncError ||
-            "Removed in app, but the Google Sheet row is still there. Copy Apps Script 2026-08-31b and New version."
+            "Removed in app, but the Google Sheet row is still there. Copy Apps Script 2026-11-19c and New version."
         );
       }
     } catch (err) {
@@ -133,7 +133,7 @@ export default function ProductionDayBanner({
         </p>
       ) : production?.sheetsSyncStatus === "failed" ? (
         <p className="px-4 pb-1 text-[10px] font-medium text-red-700">
-          App saved. Google Sheet not updated — copy Apps Script 2026-08-31b, then New version on the same web app.
+          App saved. Google Sheet not updated — copy Apps Script 2026-11-19c, then New version on the same web app.
         </p>
       ) : null}
     </>

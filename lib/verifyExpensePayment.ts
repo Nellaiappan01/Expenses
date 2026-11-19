@@ -34,6 +34,42 @@ export async function markExpensePaymentPaid(
 
   const { paymentMethod, paymentDate, paymentReference, paymentPaidTo, paymentNote } = input;
   const paymentVerifiedAt = new Date();
+  const updateFields: Record<string, unknown> = {
+    paymentStatus: "paid",
+    paymentVerifiedMethod: paymentMethod,
+    paymentDate,
+    paymentReference: paymentReference || undefined,
+    paymentPaidTo: paymentPaidTo || undefined,
+    paymentVerifiedBy: adminName,
+    paymentVerifiedAt,
+    paymentNote: paymentNote || undefined,
+    isEdited: true,
+    editedAt: paymentVerifiedAt,
+    editedBy: adminName,
+  };
+
+  if (isLegacy) {
+    updateFields.approvalStatus = "approved";
+  }
+
+  const result = await db.collection("entries").findOneAndUpdate(
+    { _id: new ObjectId(id), ...NOT_DELETED_MATCH, paymentStatus: { $ne: "paid" } },
+    { $set: updateFields },
+    { returnDocument: "after" }
+  );
+
+  if (!result) {
+    const current = await db.collection("entries").findOne({
+      _id: new ObjectId(id),
+      ...NOT_DELETED_MATCH,
+    });
+    if (current?.paymentStatus === "paid") {
+      return { ok: false, error: "Payment already verified" };
+    }
+    return { ok: false, error: "Payment verification failed" };
+  }
+
+  invalidateBalanceCache(businessId);
 
   await recordEntryAuditLogs(db, {
     entryId: id,
@@ -65,36 +101,6 @@ export async function markExpensePaymentPaid(
     reason: paymentNote || "Bulk payment verified",
   });
 
-  const updateFields: Record<string, unknown> = {
-    paymentStatus: "paid",
-    paymentVerifiedMethod: paymentMethod,
-    paymentDate,
-    paymentReference: paymentReference || undefined,
-    paymentPaidTo: paymentPaidTo || undefined,
-    paymentVerifiedBy: adminName,
-    paymentVerifiedAt,
-    paymentNote: paymentNote || undefined,
-    isEdited: true,
-    editedAt: paymentVerifiedAt,
-    editedBy: adminName,
-  };
-
-  if (isLegacy) {
-    updateFields.approvalStatus = "approved";
-  }
-
-  const result = await db.collection("entries").findOneAndUpdate(
-    { _id: new ObjectId(id), ...NOT_DELETED_MATCH },
-    { $set: updateFields },
-    { returnDocument: "after" }
-  );
-
-  if (!result) {
-    return { ok: false, error: "Payment verification failed" };
-  }
-
-  invalidateBalanceCache(businessId);
-
   const paidDoc = result as Record<string, unknown>;
   const adjustReason = `Paid via ${paymentMethod}${paymentReference ? ` — ${paymentReference}` : ""}`;
 
@@ -102,6 +108,23 @@ export async function markExpensePaymentPaid(
     return { ok: true, entry: paidDoc };
   }
 
-  await upsertEntryToSheets(db, businessId, id, paidDoc, existing, adjustReason);
-  return { ok: true, entry: paidDoc };
+  let sheetsStatus: "synced" | "pending" | "failed" = "failed";
+  let sheetsError: string | null = "Google Sheets sync failed";
+  try {
+    const sheetsResult = await upsertEntryToSheets(db, businessId, id, paidDoc, existing, adjustReason);
+    sheetsStatus = sheetsResult.status;
+    sheetsError = sheetsResult.ok ? null : sheetsResult.error ?? "Google Sheets sync failed";
+  } catch (error) {
+    sheetsError = error instanceof Error ? error.message : "Google Sheets sync failed";
+    await markEntrySyncStatus(db, id, businessId, "failed", sheetsError).catch(() => {});
+  }
+
+  return {
+    ok: true,
+    entry: {
+      ...paidDoc,
+      sheetsSyncStatus: sheetsStatus,
+      sheetsSyncError: sheetsError,
+    },
+  };
 }

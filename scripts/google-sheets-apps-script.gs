@@ -18,7 +18,18 @@
  * Column N: Tonnage — Daily Production row only; expense updates must not overwrite N
  * Column O: Drive File URL — receipt link in Google Drive
  *
- * Version: 2026-08-31b (update/delete production by ID or that date's Daily Production row)
+ * Balance rules (must match the app):
+ * - Row 2 Opening Balance is the carried opening. Recalculate must not reset it to 0.
+ * - Each next row opens from the previous row's closing.
+ * - A new tab is created only from the website Sheet card, after the opening balance
+ *   is confirmed. Auto carry uses the previous tab's last closing (wallet included once).
+ *   A custom amount is an explicit override. B2 is written only on that new empty tab.
+ *   Existing tabs and their opening balances are not changed.
+ * - Pending Approval, Payment Pending, Rejected, and Nil do not change closing.
+ * - Paid / Verified, blank status (wallet, worker, adjustment), and legacy Entry IDs do.
+ * - Wallet add increases closing (Add on). Wallet withdraw decreases it (Expenses Amount).
+ *
+ * Version: 2026-11-19c (confirmed opening on a new tab)
  */
 
 const COL = {
@@ -57,23 +68,333 @@ function headerLooksLikeEntryId_(value) {
   return s === "entry id" || s.replace(/ /g, "") === "entryid";
 }
 
-function getLedgerSheet_(ss) {
+function isClosedLedgerHeader_(value) {
+  const s = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  return s === "entry id closed" || s.indexOf("entry id closed") === 0;
+}
+
+function getOpenLedgerSheets_(ss) {
   const sheets = ss.getSheets();
+  const open = [];
   let byEntryIdHeader = null;
   for (let i = 0; i < sheets.length; i++) {
     const sh = sheets[i];
     const a1 = sh.getRange(1, COL.DATE).getValue();
     const m1 = sh.getRange(1, COL.ENTRY_ID).getValue();
     if (headerLooksLikeDate_(a1) && headerLooksLikeEntryId_(m1)) {
-      return sh;
-    }
-    if (!byEntryIdHeader && headerLooksLikeEntryId_(m1)) {
+      open.push(sh);
+    } else if (!byEntryIdHeader && headerLooksLikeEntryId_(m1)) {
       byEntryIdHeader = sh;
     }
   }
-  if (byEntryIdHeader) return byEntryIdHeader;
+  return { open: open, byEntryIdHeader: byEntryIdHeader };
+}
+
+/** Live tab is the last sheet that still has Date + Entry ID headers. */
+function getLedgerSheet_(ss) {
+  const found = getOpenLedgerSheets_(ss);
+  if (found.open.length) return found.open[found.open.length - 1];
+  if (found.byEntryIdHeader) return found.byEntryIdHeader;
+  const sheets = ss.getSheets();
   if (sheets.length > 0) return sheets[0];
   return ss.getActiveSheet();
+}
+
+function isLedgerTab_(sheet) {
+  const a1 = sheet.getRange(1, COL.DATE).getValue();
+  const m1 = sheet.getRange(1, COL.ENTRY_ID).getValue();
+  if (!headerLooksLikeDate_(a1)) return false;
+  return headerLooksLikeEntryId_(m1) || isClosedLedgerHeader_(m1);
+}
+
+/** Every ledger tab, including a closed one. Payment status must update the original row. */
+function findEntryMatches_(ss, data) {
+  const matches = [];
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    if (!isLedgerTab_(sheets[i])) continue;
+    const row = findEntryRow_(sheets[i], data);
+    if (row) matches.push({ sheet: sheets[i], row: row });
+  }
+  return matches;
+}
+
+function findEntryAcrossSheets_(ss, data) {
+  const matches = findEntryMatches_(ss, data);
+  return matches.length ? matches[0] : null;
+}
+
+/**
+ * Opening for the next row on a tab that already has a balance.
+ * An empty tab returns null. It is not silently started at zero.
+ * Carry-forward is written to B2 only by doCreateLedgerSheet_.
+ */
+function openingForAppend_(sheet) {
+  if (sheet.getLastRow() < 2) return null;
+  return getLastClosingBalance_(sheet);
+}
+
+var NO_OPENING_ERROR =
+  "This sheet has no opening balance. Open Sheet and confirm the opening balance first.";
+
+function ledgerHeaders_() {
+  return [
+    "Date",
+    "Opening Balance",
+    "Category",
+    "Expenses Amount",
+    "Notes",
+    "Add on",
+    "Source",
+    "Closing Balance",
+    "Requested by",
+    "Approved by",
+    "Payment Status",
+    "Adjust Reason",
+    "Entry ID",
+    "Tonnage",
+    "Drive File URL",
+  ];
+}
+
+function normalizeTabName_(name) {
+  return String(name || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sheetHasLedgerActivity_(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return false;
+  var rows = last - 1;
+  var ids = sheet.getRange(2, COL.ENTRY_ID, rows, 1).getValues();
+  var cats = sheet.getRange(2, COL.CATEGORY, rows, 1).getValues();
+  var expenses = sheet.getRange(2, COL.EXPENSE, rows, 1).getValues();
+  var addOns = sheet.getRange(2, COL.ADD_ON, rows, 1).getValues();
+  for (var i = 0; i < rows; i++) {
+    if (String(ids[i][0] || "").trim()) return true;
+    if (String(cats[i][0] || "").trim()) return true;
+    var expense = readSheetNumber_(expenses[i][0]);
+    var addOn = readSheetNumber_(addOns[i][0]);
+    if (expense !== null && expense !== 0) return true;
+    if (addOn !== null && addOn !== 0) return true;
+  }
+  return false;
+}
+
+function isBalanceTab_(sheet) {
+  var a1 = sheet.getRange(1, COL.DATE).getValue();
+  var m1 = sheet.getRange(1, COL.ENTRY_ID).getValue();
+  return headerLooksLikeDate_(a1) && (headerLooksLikeEntryId_(m1) || isClosedLedgerHeader_(m1));
+}
+
+function previousClosingSnapshot_(ss) {
+  var live = getLedgerSheet_(ss);
+  var sheets = ss.getSheets();
+  var source = null;
+  if (live && sheetHasLedgerActivity_(live)) {
+    source = live;
+  } else {
+    for (var i = sheets.length - 1; i >= 0; i--) {
+      var sh = sheets[i];
+      if (live && sh.getSheetId() === live.getSheetId()) continue;
+      if (!isBalanceTab_(sh)) continue;
+      if (sh.getLastRow() < 2 || getLastClosingBalance_(sh) === null) continue;
+      source = sh;
+      break;
+    }
+  }
+  return {
+    sheet: live,
+    sheetName: live ? live.getName() : "",
+    balanceSheetName: source ? source.getName() : "",
+    closing: source ? getLastClosingBalance_(source) : null,
+  };
+}
+
+function widenLedgerColumns_(sheet) {
+  var widths = [120, 140, 160, 150, 200, 110, 120, 150, 140, 140, 150, 160, 220, 90, 240];
+  for (var c = 0; c < widths.length; c++) {
+    sheet.setColumnWidth(c + 1, widths[c]);
+  }
+  sheet.setFrozenRows(1);
+}
+
+/**
+ * Write the confirmed opening onto the active tab only when that tab has no entries yet.
+ * Does not change any other tab.
+ */
+function doSetSheetOpening_(data) {
+  if (data.confirm !== true) {
+    return jsonResponse_({
+      ok: false,
+      error: "Confirm the opening balance before saving it.",
+    });
+  }
+  var amount = readSheetNumber_(data.openingBalance);
+  var expected = normalizeTabName_(data.expectedPreviousSheet);
+  if (amount === null) return jsonResponse_({ ok: false, error: "Enter the opening balance" });
+  if (Math.abs(amount) > 100000000000) {
+    return jsonResponse_({ ok: false, error: "Amount is too large" });
+  }
+
+  var live = getLedgerSheet_(SpreadsheetApp.getActiveSpreadsheet());
+  if (!live || normalizeTabName_(live.getName()).toLowerCase() !== expected.toLowerCase()) {
+    return jsonResponse_({
+      ok: false,
+      error: "The active sheet changed. Refresh and confirm again.",
+    });
+  }
+  if (sheetHasLedgerActivity_(live)) {
+    return jsonResponse_({
+      ok: false,
+      error: "This sheet already has entries. Its opening balance was not changed.",
+    });
+  }
+
+  live.getRange(2, COL.OPENING).setValue(amount);
+  live.getRange(2, COL.CLOSING).setValue(amount);
+  widenLedgerColumns_(live);
+  return jsonResponse_({
+    ok: true,
+    action: "setSheetOpening",
+    activeSheetName: live.getName(),
+    openingBalance: amount,
+  });
+}
+
+function doPreviewNewSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const prev = previousClosingSnapshot_(ss);
+  const names = [];
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) names.push(sheets[i].getName());
+  return jsonResponse_({
+    ok: true,
+    action: "previewNewSheet",
+    activeSheetName: prev.sheetName,
+    balanceSheetName: prev.balanceSheetName,
+    previousClosing: prev.closing,
+    tabNames: names,
+  });
+}
+
+/**
+ * Create one new tab in this spreadsheet. Copy row-1 headers.
+ * Write the confirmed opening into B2 and the same amount into H2.
+ * Do not write any other tab, and do not recalculate historical rows.
+ */
+function doCreateLedgerSheet_(data) {
+  if (data.confirm !== true) {
+    return jsonResponse_({
+      ok: false,
+      error: "Confirm the opening balance before creating the sheet.",
+    });
+  }
+
+  const name = normalizeTabName_(data.sheetName);
+  const mode = String(data.openingMode || "").toLowerCase();
+  const expectedPrevious = normalizeTabName_(data.expectedPreviousSheet);
+  const confirmed = readSheetNumber_(data.openingBalance);
+
+  if (!name) return jsonResponse_({ ok: false, error: "Enter a sheet name" });
+  if (name.length > 80) return jsonResponse_({ ok: false, error: "Sheet name is too long" });
+  if (/[\[\]*\/\\?:]/.test(name)) {
+    return jsonResponse_({ ok: false, error: "Sheet name cannot include [ ] * / \\ ? :" });
+  }
+  if (mode !== "carry" && mode !== "custom") {
+    return jsonResponse_({ ok: false, error: "Choose Auto Carry Forward or Custom Opening Balance" });
+  }
+  if (confirmed === null) {
+    return jsonResponse_({ ok: false, error: "Enter the opening balance" });
+  }
+  if (Math.abs(confirmed) > 100000000000) {
+    return jsonResponse_({ ok: false, error: "Amount is too large" });
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ss.getSheets();
+  const wanted = name.toLowerCase();
+  for (let i = 0; i < sheets.length; i++) {
+    if (normalizeTabName_(sheets[i].getName()).toLowerCase() === wanted) {
+      return jsonResponse_({
+        ok: false,
+        error: "A tab with this name already exists. Its opening balance was not changed.",
+      });
+    }
+  }
+
+  const prev = previousClosingSnapshot_(ss);
+  if (
+    !expectedPrevious ||
+    normalizeTabName_(prev.sheetName).toLowerCase() !== expectedPrevious.toLowerCase()
+  ) {
+    return jsonResponse_({
+      ok: false,
+      error: "The active sheet changed. Refresh and confirm again.",
+    });
+  }
+
+  if (mode === "carry") {
+    if (prev.closing === null) {
+      return jsonResponse_({
+        ok: false,
+        error: "No previous closing balance. Enter a custom opening balance.",
+      });
+    }
+    if (Math.abs(confirmed - prev.closing) > 0.009) {
+      return jsonResponse_({
+        ok: false,
+        error: "Previous closing changed. Refresh and confirm again.",
+      });
+    }
+  }
+
+  const live = prev.sheet;
+  let headers = ledgerHeaders_();
+  if (live) {
+    const copied = live.getRange(1, 1, 1, 15).getValues()[0];
+    if (headerLooksLikeDate_(copied[0])) {
+      headers = [];
+      const canonical = ledgerHeaders_();
+      for (let c = 0; c < 15; c++) {
+        const cell = String(copied[c] || "").trim();
+        headers.push(cell || canonical[c]);
+      }
+    }
+  }
+
+  const created = ss.insertSheet(name, ss.getNumSheets());
+  try {
+    created.getRange(1, 1, 1, 15).setValues([headers]);
+    if (created.getLastRow() > 1) {
+      throw new Error("New tab was not empty");
+    }
+    created.getRange(2, COL.OPENING).setValue(confirmed);
+    created.getRange(2, COL.CLOSING).setValue(confirmed);
+    widenLedgerColumns_(created);
+  } catch (createErr) {
+    try {
+      ss.deleteSheet(created);
+    } catch (cleanupErr) {
+      /* new tab could not be removed */
+    }
+    return jsonResponse_({ ok: false, error: String(createErr) });
+  }
+
+  return jsonResponse_({
+    ok: true,
+    action: "createLedgerSheet",
+    sheetName: created.getName(),
+    activeSheetName: created.getName(),
+    previousSheetName: prev.balanceSheetName || prev.sheetName,
+    previousClosing: prev.closing,
+    openingBalance: confirmed,
+    openingMode: mode,
+  });
 }
 
 function doPost(e) {
@@ -88,6 +409,15 @@ function doPost(e) {
     const lock = LockService.getScriptLock();
     try {
       lock.waitLock(45000);
+      if (action === "previewnewsheet") {
+        return doPreviewNewSheet_();
+      }
+      if (action === "setsheetopening") {
+        return doSetSheetOpening_(data);
+      }
+      if (action === "createledgersheet") {
+        return doCreateLedgerSheet_(data);
+      }
       const sheet = getLedgerSheet_(SpreadsheetApp.getActiveSpreadsheet());
       ensureDriveHeader_(sheet);
       ensureTonnageHeader_(sheet);
@@ -179,6 +509,7 @@ function doGet() {
     ok: true,
     message: "Site Ledger webhook is running",
     supportsDriveUpload: true,
+    scriptVersion: "2026-11-19c",
   });
 }
 
@@ -193,16 +524,22 @@ function doUpsert_(sheet, data) {
     return jsonResponse_({ ok: false, error: "Missing entry data" });
   }
 
-  const existing = findEntryRow_(sheet, data);
-  if (existing) {
-    return doUpdateAtRow_(sheet, data, existing);
+  const matches = findEntryMatches_(sheet.getParent(), data);
+  if (matches.length) {
+    let result = null;
+    for (let i = 0; i < matches.length; i++) {
+      result = doUpdateAtRow_(matches[i].sheet, data, matches[i].row);
+    }
+    return result;
   }
   return doAppend_(sheet, data);
 }
 
 function doAppend_(sheet, data) {
-  const lastClosing = getLastClosingBalance_(sheet);
-  const opening = lastClosing;
+  const opening = openingForAppend_(sheet);
+  if (opening === null) {
+    return jsonResponse_({ ok: false, error: NO_OPENING_ERROR });
+  }
 
   const expenseAmount = Number(data.expenseAmount) || 0;
   const addOn = Number(data.addOn) || 0;
@@ -252,11 +589,22 @@ function doUpsertDailyProduction_(sheet, data) {
   }
 
   const formattedDate = formatDate_(data.date);
-  const keep = keepOneProductionRow_(sheet, productionId, formattedDate);
-  const afterExpense = findLastExpenseRowForDate_(sheet, formattedDate, keep);
+  const open = getOpenLedgerSheets_(sheet.getParent()).open;
+  const targets = open.length ? open : [sheet];
+  let home = sheet;
+  let keep = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const candidate = keepOneProductionRow_(targets[i], productionId, formattedDate);
+    if (candidate) {
+      home = targets[i];
+      keep = candidate;
+      break;
+    }
+  }
+  const afterExpense = findLastExpenseRowForDate_(home, formattedDate, keep);
 
   if (keep) {
-    return placeDailyProductionRow_(sheet, data, productionId, keep, afterExpense);
+    return placeDailyProductionRow_(home, data, productionId, keep, afterExpense);
   }
   return placeDailyProductionRow_(sheet, data, productionId, 0, afterExpense);
 }
@@ -314,7 +662,10 @@ function placeDailyProductionRow_(sheet, data, productionId, existingRow, afterE
       sheet.insertRowAfter(afterExpense);
       row = afterExpense + 1;
     } else {
-      const opening = getLastClosingBalance_(sheet);
+      const opening = openingForAppend_(sheet);
+      if (opening === null) {
+        return jsonResponse_({ ok: false, error: NO_OPENING_ERROR });
+      }
       sheet.appendRow([
         formatDate_(data.date),
         opening,
@@ -447,20 +798,27 @@ function doDeleteDailyProduction_(sheet, data) {
     return jsonResponse_({ ok: false, error: "Missing production id" });
   }
 
-  const rows = collectProductionRows_(sheet, productionId, dateValue);
-  if (!rows.length) {
+  const open = getOpenLedgerSheets_(sheet.getParent()).open;
+  const targets = open.length ? open : [sheet];
+  let deletedRow = 0;
+  for (let t = 0; t < targets.length; t++) {
+    const target = targets[t];
+    const rows = collectProductionRows_(target, productionId, dateValue);
+    if (!rows.length) continue;
+    const descending = rows.slice().sort(function (a, b) {
+      return b - a;
+    });
+    const first = descending[descending.length - 1];
+    for (let i = 0; i < descending.length; i++) {
+      target.deleteRow(descending[i]);
+    }
+    recalculateFromRow_(target, first);
+    deletedRow = first;
+  }
+  if (!deletedRow) {
     return jsonResponse_({ ok: true, action: "deleteDailyProduction", skipped: true });
   }
-
-  const descending = rows.slice().sort(function (a, b) {
-    return b - a;
-  });
-  const first = descending[descending.length - 1];
-  for (let i = 0; i < descending.length; i++) {
-    sheet.deleteRow(descending[i]);
-  }
-  recalculateFromRow_(sheet, first);
-  return jsonResponse_({ ok: true, action: "deleteDailyProduction", row: first });
+  return jsonResponse_({ ok: true, action: "deleteDailyProduction", row: deletedRow });
 }
 
 function productionTonnageValue_(data) {
@@ -537,15 +895,43 @@ function doRecalculate_(sheet) {
 }
 
 function doDelete_(sheet, data) {
-  const row = findEntryRow_(sheet, data);
-  if (!row) {
+  const matches = findEntryMatches_(sheet.getParent(), data);
+  if (!matches.length) {
     return jsonResponse_({ ok: true, action: "delete", skipped: true });
   }
 
-  sheet.deleteRow(row);
-  recalculateFromRow_(sheet, row);
+  const groups = [];
+  for (let i = 0; i < matches.length; i++) {
+    let group = null;
+    for (let g = 0; g < groups.length; g++) {
+      if (groups[g].sheet.getSheetId() === matches[i].sheet.getSheetId()) group = groups[g];
+    }
+    if (!group) {
+      group = { sheet: matches[i].sheet, rows: [] };
+      groups.push(group);
+    }
+    group.rows.push(matches[i].row);
+  }
 
-  return jsonResponse_({ ok: true, action: "delete", row: row });
+  let deletedRow = 0;
+  for (let g = 0; g < groups.length; g++) {
+    const target = groups[g].sheet;
+    const rows = groups[g].rows.sort(function (a, b) {
+      return b - a;
+    });
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const carriedOpening = row === 2 ? readSheetNumber_(target.getRange(2, COL.OPENING).getValue()) : null;
+      target.deleteRow(row);
+      if (row === 2 && carriedOpening !== null && target.getLastRow() >= 2) {
+        target.getRange(2, COL.OPENING).setValue(carriedOpening);
+      }
+      recalculateFromRow_(target, row);
+      deletedRow = row;
+    }
+  }
+
+  return jsonResponse_({ ok: true, action: "delete", row: deletedRow });
 }
 
 function findEntryRow_(sheet, data) {
@@ -625,7 +1011,11 @@ function recalculateFromRow_(sheet, startRow) {
 
   let prevClosing = 0;
   if (startRow > 2) {
-    prevClosing = Number(sheet.getRange(startRow - 1, COL.CLOSING).getValue()) || 0;
+    prevClosing = balanceBeforeRow_(sheet, startRow);
+  } else {
+    // Never replace the first row's opening with zero. That cell is the previous sheet's closing.
+    const anchor = readSheetNumber_(sheet.getRange(2, COL.OPENING).getValue());
+    prevClosing = anchor === null ? 0 : anchor;
   }
 
   const openings = [];
@@ -646,12 +1036,39 @@ function recalculateFromRow_(sheet, startRow) {
   sheet.getRange(startRow, COL.CLOSING, numRows, 1).setValues(closings);
 }
 
+/**
+ * Same rule as lib/ledgerMath.ts sheetStatusCountsExpense.
+ * Blank status still counts: wallet withdraw, worker payment, and adjustment have no workflow status.
+ */
 function paymentStatusCountsExpense_(status, isLegacyHexId) {
   const s = String(status || "").trim();
-  if (s === "Rejected") return false;
-  // Legacy sheets stored Entry ID in column K before Payment Status existed
+  if (!s) return true;
+  if (s === "Rejected" || s === "Pending Approval" || s === "Payment Pending" || s === "Nil") {
+    return false;
+  }
+  // Legacy sheets stored Entry ID in column K before Payment Status existed.
   if (isLegacyHexId && /^[a-f0-9]{24}$/i.test(s)) return true;
   return true;
+}
+
+function readSheetNumber_(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  if (typeof value === "number" && isFinite(value)) return value;
+  const cleaned = String(value).replace(/[₹,\s]/g, "");
+  if (!cleaned) return null;
+  const num = Number(cleaned);
+  return isFinite(num) ? num : null;
+}
+
+function balanceBeforeRow_(sheet, row) {
+  if (row <= 2) {
+    const anchor = readSheetNumber_(sheet.getRange(2, COL.OPENING).getValue());
+    return anchor === null ? 0 : anchor;
+  }
+  const closing = readSheetNumber_(sheet.getRange(row - 1, COL.CLOSING).getValue());
+  if (closing !== null) return closing;
+  const opening = readSheetNumber_(sheet.getRange(row - 1, COL.OPENING).getValue());
+  return opening === null ? 0 : opening;
 }
 
 function ensureDriveHeader_(sheet) {
@@ -670,10 +1087,10 @@ function ensureTonnageHeader_(sheet) {
 
 function getLastClosingBalance_(sheet) {
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return 0;
-  const value = sheet.getRange(lastRow, COL.CLOSING).getValue();
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+  if (lastRow < 2) return null;
+  const closing = readSheetNumber_(sheet.getRange(lastRow, COL.CLOSING).getValue());
+  if (closing !== null) return closing;
+  return readSheetNumber_(sheet.getRange(lastRow, COL.OPENING).getValue());
 }
 
 function sheetDateKey_(value) {
@@ -709,7 +1126,7 @@ function isDailyProductionPayload_(data) {
 }
 
 function jsonResponse_(obj) {
-  obj.scriptVersion = "2026-08-31b";
+  obj.scriptVersion = "2026-11-19c";
   obj.supportsDriveUpload = true;
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
     ContentService.MimeType.JSON

@@ -45,14 +45,17 @@ import SheetsSyncBanner from "../components/SheetsSyncBanner";
 import type { SerializedProduction } from "@/lib/dailyProduction";
 import { formatProductionTonnes } from "@/lib/productionDisplay";
 import ProductionDayBanner from "../components/salt/ProductionDayBanner";
-import AttachmentViewButton from "../components/salt/AttachmentViewButton";
+import AttachmentViewButton, { entryAttachmentViewUrl } from "../components/salt/AttachmentViewButton";
+import { formatEntryAmount } from "@/lib/entryDisplay";
 
 function formatDate(isoDate: string) {
   return formatDateDDMMYYYY(isoDate);
 }
 
-function formatAmount(amount: number) {
-  return `₹${Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+function formatAmount(amount: number, type?: Entry["type"]) {
+  if (type) return formatEntryAmount(amount, type);
+  const formatted = Math.abs(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+  return amount < 0 ? `₹ -${formatted}` : `₹${formatted}`;
 }
 
 function groupByDate(entries: Entry[], productionDates: string[] = []) {
@@ -1013,25 +1016,29 @@ export default function TrackPage() {
                                       </button>
                                     </td>
                                     <td className="px-2 py-2.5 align-top text-[#5A7FA5]">
-                                      <p className="break-words text-xs font-medium leading-snug text-[#0B4A8C]">
-                                        {isNilEntry(entry) ? NIL_DETAIL : entry.name}
-                                      </p>
-                                      {isNilEntry(entry) ? null : (
-                                      <p className="mt-0.5 break-words text-[11px] leading-snug">
-                                        {entry.note || entry.method}
-                                      </p>
-                                      )}
+                                      <div className="flex items-start justify-between gap-1">
+                                        <div className="min-w-0">
+                                          <p className="break-words text-xs font-medium leading-snug text-[#0B4A8C]">
+                                            {isNilEntry(entry) ? NIL_DETAIL : entry.name}
+                                          </p>
+                                          {isNilEntry(entry) ? null : (
+                                            <p className="mt-0.5 break-words text-[11px] leading-snug">
+                                              {entry.note || entry.method}
+                                            </p>
+                                          )}
+                                        </div>
+                                        <AttachmentViewButton entry={entry} />
+                                      </div>
                                     </td>
                                     <td className="px-2 py-2.5 align-top text-right">
                                       <span
                                         className={`whitespace-nowrap text-[11px] font-extrabold tabular-nums ${visual.amount}`}
                                       >
-                                        {isNilEntry(entry) ? "Nil" : formatAmount(entry.amount)}
+                                        {isNilEntry(entry) ? "Nil" : formatAmount(entry.amount, entry.type)}
                                       </span>
                                     </td>
                                     <td className="track-col-status px-2 py-2.5 align-top">
                                       <div className="flex flex-nowrap items-center gap-1">
-                                        <AttachmentViewButton entry={entry} />
                                         <PaymentStatusBadge
                                           entry={entry}
                                           iconOnly={isAwaitingApprover(entry)}
@@ -1178,7 +1185,7 @@ export default function TrackPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <p className="font-bold tabular-nums text-[#0B4A8C]">
-                            {nilDay ? "Nil" : formatAmount(entry.amount)}
+                            {nilDay ? "Nil" : formatAmount(entry.amount, entry.type)}
                           </p>
                           {!canModify && (
                             <span className="max-w-[7.5rem] text-right text-[10px] font-semibold leading-tight text-amber-800">
@@ -1242,7 +1249,7 @@ export default function TrackPage() {
                             </>
                           ) : (
                             <>
-                          <Row label="Amount" value={formatAmount(entry.amount)} />
+                          <Row label="Amount" value={formatAmount(entry.amount, entry.type)} />
                           <Row label="Payment" value={entry.method} />
                           <Row label="Requested by" value={entry.name} />
                           {entry.approvedBy && <Row label="Approved by" value={entry.approvedBy} />}
@@ -1250,21 +1257,14 @@ export default function TrackPage() {
                             </>
                           )}
                           {nilDay ? null : <PaymentStatusDetail entry={entry} />}
-                          {entry.attachmentUrl && (
-                            <div className="flex justify-between gap-4">
-                              <dt className="text-[#5A7FA5]">Attachment</dt>
+                          {entryAttachmentViewUrl(entry) ? (
+                            <div className="flex items-center justify-between gap-4">
+                              <dt className="text-[#5A7FA5]">Photo</dt>
                               <dd>
-                                <a
-                                  href={entry.attachmentUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-medium text-[#0B4A8C] underline"
-                                >
-                                  View
-                                </a>
+                                <AttachmentViewButton entry={entry} />
                               </dd>
                             </div>
-                          )}
+                          ) : null}
                         </dl>
                       </div>
                     )}

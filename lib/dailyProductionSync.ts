@@ -11,7 +11,7 @@ import { getSheetsWebhookUrl } from "./userSettings";
 
 const SHEETS_SYNC_LEASE_MS = 120_000;
 const PRODUCTION_SHEET_SCRIPT_HINT =
-  "Google Sheet did not take this harvest change. Copy scripts/google-sheets-apps-script.gs, then Deploy → Manage deployments → edit → New version (same URL). Then Update or Delete again.";
+  "Google Sheet did not take this harvest change. Copy Apps Script 2026-11-19c from Settings, then Deploy → Manage deployments → edit → New version (same URL). Then Update or Delete again.";
 
 function parseSheetsAction(result: SheetsSyncResult): string {
   try {

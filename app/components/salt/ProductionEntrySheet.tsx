@@ -160,7 +160,7 @@ export default function ProductionEntrySheet({
       if (next.sheetsSyncStatus === "failed") {
         setError(
           next.sheetsSyncError ||
-            "Saved in app, but Google Sheet did not update. Copy Apps Script 2026-08-31b and New version on the same web app."
+            "Saved in app, but Google Sheet did not update. Copy Apps Script 2026-11-19c and New version on the same web app."
         );
         setSaved(false);
         return;
@@ -189,7 +189,7 @@ export default function ProductionEntrySheet({
       if (data.sheetsSyncStatus === "failed") {
         throw new Error(
           data.sheetsSyncError ||
-            "Removed in app, but the Google Sheet row is still there. Copy Apps Script 2026-08-31b and New version, then delete again."
+            "Removed in app, but the Google Sheet row is still there. Copy Apps Script 2026-11-19c and New version, then delete again."
         );
       }
       onClose();

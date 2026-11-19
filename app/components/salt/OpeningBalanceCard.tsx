@@ -17,7 +17,8 @@ type BalanceSummary = {
 };
 
 function formatAmount(amount: number) {
-  return `₹ ${Math.abs(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const formatted = Math.abs(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  return amount < 0 ? `₹ -${formatted}` : `₹ ${formatted}`;
 }
 
 function formatLastUpdated() {
@@ -37,6 +38,7 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
       ? { net: cached, pendingApproval: 0, paymentPending: 0, totalUnpaid: 0 }
       : null;
   });
+  const [sheetName, setSheetName] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
   const [showActions, setShowActions] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
@@ -74,6 +76,7 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
   useEffect(() => {
     if (!userId) {
       setSummary(null);
+      setSheetName("");
       return;
     }
     const cached = readBalanceCache(userId);
@@ -84,7 +87,34 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
     );
     if (cached !== null) setUpdatedAt(formatLastUpdated());
     fetchBalance();
+    try {
+      const raw = sessionStorage.getItem("ledger_sheet_preview");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { userId?: string; preview?: { activeSheetName?: string } };
+        if (parsed.userId === userId && parsed.preview?.activeSheetName) {
+          setSheetName(parsed.preview.activeSheetName);
+        }
+      }
+    } catch {
+      // ignore
+    }
   }, [userId, fetchBalance, refreshTrigger]);
+
+  useEffect(() => {
+    if (!showBreakdown || !userId || sheetName) return;
+    let cancelled = false;
+    apiFetch("/api/sheets/tabs")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.ok && typeof data.activeSheetName === "string") {
+          setSheetName(data.activeSheetName);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [showBreakdown, userId, sheetName]);
 
   useEffect(() => {
     setIsTouch(window.matchMedia("(pointer: coarse)").matches);
@@ -191,6 +221,7 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
             </p>
             <p className="salt-balance-hint mt-0.5 text-[11px] leading-tight">
               Current Available Balance
+              {sheetName ? <span className="salt-balance-hint-muted"> · {sheetName}</span> : null}
               {hasUnpaid && !showBreakdown ? (
                 <span className="salt-balance-hint-muted"> · {isTouch ? "hold" : "tap"} for details</span>
               ) : null}
@@ -203,7 +234,7 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
             onTouchEnd={isTouch ? handleWalletTouchEnd : undefined}
             onTouchCancel={isTouch ? handleWalletTouchEnd : undefined}
             aria-pressed={showActions}
-            aria-label={showActions ? "Hide wallet and adjust" : "Show wallet and adjust"}
+            aria-label={showActions ? "Hide wallet, adjust, and sheet" : "Show wallet, adjust, and sheet"}
             className="relative z-10 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#0B4A8C] shadow-md transition-transform active:scale-95 touch-manipulation"
           >
             <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -220,6 +251,17 @@ export default function OpeningBalanceCard({ refreshTrigger = 0 }: { refreshTrig
         {showBreakdown && (
           <div className="relative mt-3 border-t border-white/15 pt-3">
             <div className="overflow-hidden rounded-xl border border-white/12 bg-black/15">
+              <div className="flex items-center justify-between gap-3 border-b border-white/8 px-3 py-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="h-1 w-1 shrink-0 rounded-full bg-white/45" aria-hidden />
+                  <span className="truncate text-[11px] font-medium tracking-wide text-white/65">
+                    Sheet
+                  </span>
+                </div>
+                <span className="shrink-0 text-xs font-semibold text-white/90">
+                  {sheetName || "Reading…"}
+                </span>
+              </div>
               <div className="flex items-center justify-between gap-3 border-b border-white/8 px-3 py-2.5">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="h-1 w-1 shrink-0 rounded-full bg-white/45" aria-hidden />

@@ -20,6 +20,7 @@ const INDEXES: {
   { collection: "entries", keys: { businessId: 1, deleted: 1, type: 1 } },
   { collection: "entries", keys: { businessId: 1, approvalStatus: 1, paymentStatus: 1 } },
   { collection: "sessions", keys: { token: 1 } },
+  { collection: "sheet_tabs", keys: { businessId: 1, sheetNameKey: 1 }, unique: true },
 ];
 
 export function ensureDbIndexes(db: Db): Promise<void> {

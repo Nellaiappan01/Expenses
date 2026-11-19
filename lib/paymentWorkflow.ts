@@ -1,3 +1,4 @@
+import { entryEffectRupees } from "./ledgerMath";
 import type { ApprovalStatus, Entry, PaymentStatus, PaymentVerifiedMethod } from "./types";
 
 /** Legacy entries (no workflow fields) behave as approved + paid. */
@@ -8,11 +9,12 @@ export function isLegacyWorkflowEntry(entry: {
   return !entry.approvalStatus && !entry.paymentStatus;
 }
 
-/** Whether an expense amount should affect wallet balance / paid totals. */
-export function expenseCountsInBalance(entry: Pick<Entry, "type" | "paymentStatus">): boolean {
+/** Whether this row moves the closing balance. Pending, rejected, and Nil expenses do not. */
+export function expenseCountsInBalance(
+  entry: Pick<Entry, "type" | "amount" | "paymentStatus" | "approvalStatus" | "isNil" | "deleted">
+): boolean {
   if (entry.type !== "expense") return true;
-  const status = entry.paymentStatus ?? "paid";
-  return status === "paid";
+  return entryEffectRupees(entry) !== 0;
 }
 
 export function approvalStatusLabel(status?: ApprovalStatus): string {

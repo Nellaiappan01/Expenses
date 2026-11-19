@@ -18,7 +18,10 @@ function readStoredUser() {
   try {
     const stored = localStorage.getItem(USER_KEY);
     if (!stored) return null;
-    return JSON.parse(stored) as {
+    const parsed = JSON.parse(stored) as { token?: string };
+    if (!parsed.token) return null;
+    return parsed as {
+      token?: string;
       userId?: string;
       userName?: string;
       username?: string;
@@ -139,10 +142,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
       try {
         const data = JSON.parse(stored);
         if (data.token) return { Authorization: `Bearer ${data.token}` };
-        if (data.userId) return { "X-User-Id": data.userId };
       } catch {}
     }
-    return { "X-User-Id": "default" };
+    return {};
   }, []);
 
   const value: UserContextType = {

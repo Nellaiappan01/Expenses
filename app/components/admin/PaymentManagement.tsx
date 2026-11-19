@@ -315,7 +315,14 @@ export default function PaymentManagement({ dashboard = false }: { dashboard?: b
           paymentNote: paymentNote || undefined,
         }),
       });
-      const data = await readApiJson<{ error?: string }>(res);
+      const data = await readApiJson<{ error?: string; paymentStatus?: string }>(res);
+      if (data.paymentStatus === "paid") {
+        notifyLedgerDataChanged();
+        setSuccess("Payment marked as paid & verified");
+        setVerifyEntry(null);
+        load();
+        return;
+      }
       if (!res.ok) throw new Error(data.error || "Verification failed");
       notifyLedgerDataChanged();
       setSuccess("Payment marked as paid & verified");

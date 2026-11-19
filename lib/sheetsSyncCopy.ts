@@ -12,6 +12,13 @@ export function friendlySheetsError(raw: string): string {
   if (text.includes("already running")) {
     return "A write is already running. Wait a few seconds.";
   }
+  if (
+    text.includes("unable to open the file") ||
+    text.includes("<html") ||
+    text.includes("html instead")
+  ) {
+    return "Google did not run the sheet update. Tap Sync All once.";
+  }
   return "Tap Sync All to retry.";
 }
 

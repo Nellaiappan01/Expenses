@@ -1,4 +1,5 @@
 import { formatDriveDateFolderName } from "./dateFormat";
+import { postAppsScript } from "./googleSheetsSync";
 import { driveViewUrl } from "./googleDriveFolder";
 
 const DRIVE_UPLOAD_TIMEOUT_MS = 45_000;
@@ -59,21 +60,18 @@ export async function uploadExpenseAttachmentToDrive(params: {
   const fileName = `receipt-${params.isoDate}-${Date.now()}.${mimeToExt(parsed.mimeType)}`;
 
   try {
-    const res = await fetch(webhook, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const { response: res, body: responseBody } = await postAppsScript(
+      webhook,
+      {
         action: "uploadAttachment",
         folderId: params.folderId,
         dateFolderName: folderName,
         fileName,
         mimeType: parsed.mimeType,
         fileBase64: parsed.base64,
-      }),
-      signal: AbortSignal.timeout(DRIVE_UPLOAD_TIMEOUT_MS),
-    });
-
-    const responseBody = await res.text().catch(() => "");
+      },
+      DRIVE_UPLOAD_TIMEOUT_MS
+    );
     let parsedJson: DriveWebhookResponse | null = null;
     if (responseBody.trim()) {
       try {

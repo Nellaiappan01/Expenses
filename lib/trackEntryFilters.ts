@@ -1,4 +1,3 @@
-import { SHEETS_SYNC_DEFERRED_NOR } from "./googleSheetsSync";
 import { AWAITING_PAYMENT_MATCH } from "./paymentWorkflow";
 
 export type TrackFilterParams = {
@@ -156,12 +155,6 @@ export function buildTrackEntryMatch(
   const sheetsSync = filters.sheetsSync?.trim();
   if (sheetsSync === "pending" || sheetsSync === "failed") {
     match.sheetsSyncStatus = sheetsSync;
-    const nor = [SHEETS_SYNC_DEFERRED_NOR];
-    if (match.$nor) {
-      match.$nor = [...(match.$nor as unknown[]), ...nor];
-    } else {
-      match.$nor = nor;
-    }
   }
 
   return match;
